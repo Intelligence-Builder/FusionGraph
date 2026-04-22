@@ -3,7 +3,7 @@
 //! This crate provides the core graph data structures and algorithms:
 //! - CSR (Compressed Sparse Row) storage with micro-sharding
 //! - Lock-free delta layer for real-time updates
-//! - Traversal algorithms (BFS, DFS, Dijkstra)
+//! - Traversal primitives with breadth-first search
 //! - Epoch-based memory reclamation
 
 #![warn(missing_docs)]
