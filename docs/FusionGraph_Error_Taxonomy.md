@@ -444,6 +444,24 @@ pub enum GraphError {
     // CSR errors
     #[error("FG-CSR-E001: Out of memory (requested {requested}, available {available})")]
     OutOfMemory { requested: usize, available: usize },
+
+    #[error("FG-CSR-F001: Corruption detected in shard {shard_id}")]
+    CsrCorruption { shard_id: u32, expected: u64, actual: u64 },
+
+    #[error("FG-TRV-E001: Node {id} not found")]
+    NodeNotFound { id: NodeId },
+
+    #[error("FG-MEM-E001: Memory limit exceeded ({requested} > {limit})")]
+    MemoryLimitExceeded { requested: usize, limit: usize },
+
+    #[error("FG-ICE-E001: Iceberg connection failed: {message}")]
+    IcebergConnectionFailed { message: String },
+
+    #[error("FG-AUT-E001: Credentials expired")]
+    CredentialExpired,
+
+    #[error("FG-SYS-E001: Circuit breaker open")]
+    CircuitOpen,
     
     // ... etc
     
@@ -464,6 +482,12 @@ impl GraphError {
             Self::OntologyParse { .. } => "FG-ONT-E001",
             Self::DanglingEdge { .. } => "FG-ONT-E003",
             Self::OutOfMemory { .. } => "FG-CSR-E001",
+            Self::CsrCorruption { .. } => "FG-CSR-F001",
+            Self::NodeNotFound { .. } => "FG-TRV-E001",
+            Self::MemoryLimitExceeded { .. } => "FG-MEM-E001",
+            Self::IcebergConnectionFailed { .. } => "FG-ICE-E001",
+            Self::CredentialExpired => "FG-AUT-E001",
+            Self::CircuitOpen => "FG-SYS-E001",
             // ...
         }
     }
