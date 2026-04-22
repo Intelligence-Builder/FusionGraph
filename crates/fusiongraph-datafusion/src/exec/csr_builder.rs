@@ -150,7 +150,26 @@ impl ExecutionPlan for CSRBuilderExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> datafusion::error::Result<SendableRecordBatchStream> {
-        let input_stream = self.input.execute(partition, context)?;
+        if partition != 0 {
+            return Err(DataFusionError::Execution(format!(
+                "CSRBuilderExec produces a single output partition, but partition {} was requested",
+                partition
+            )));
+        }
+
+        let input_partition_count = self
+            .input
+            .properties()
+            .output_partitioning()
+            .partition_count();
+        if input_partition_count != 1 {
+            return Err(DataFusionError::Execution(format!(
+                "CSRBuilderExec requires a single input partition, but the input has {} partitions; coalesce the input before execution",
+                input_partition_count
+            )));
+        }
+
+        let input_stream = self.input.execute(0, context)?;
         let config = self.config.clone();
         let schema = self.schema();
         let input_schema = self.input.schema();
