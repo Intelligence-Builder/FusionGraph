@@ -39,6 +39,13 @@ pub enum GraphError {
         to: NodeId,
     },
 
+    /// Graph exceeds the CSR representation limits.
+    #[error("FG-CSR-E003: Unsupported graph size: {reason}")]
+    UnsupportedGraphSize {
+        /// Human-readable size or capacity failure.
+        reason: String,
+    },
+
     /// Delta layer overflow.
     #[error("FG-DLT-E001: Delta layer overflow ({count} entries exceed threshold {threshold})")]
     DeltaOverflow {
@@ -49,7 +56,9 @@ pub enum GraphError {
     },
 
     /// Traversal timeout.
-    #[error("FG-TRV-E003: Traversal timed out after {duration_ms}ms (visited {nodes_visited} nodes)")]
+    #[error(
+        "FG-TRV-E003: Traversal timed out after {duration_ms}ms (visited {nodes_visited} nodes)"
+    )]
     TraversalTimeout {
         /// Duration in milliseconds.
         duration_ms: u64,
@@ -73,6 +82,7 @@ impl GraphError {
             Self::OutOfMemory { .. } => "FG-CSR-E001",
             Self::ShardCorruption { .. } => "FG-CSR-F001",
             Self::InvalidEdge { .. } => "FG-CSR-E002",
+            Self::UnsupportedGraphSize { .. } => "FG-CSR-E003",
             Self::DeltaOverflow { .. } => "FG-DLT-E001",
             Self::TraversalTimeout { .. } => "FG-TRV-E003",
             Self::InvalidTraversal { .. } => "FG-TRV-E002",
@@ -86,7 +96,10 @@ impl GraphError {
 
     /// Returns true if the operation can be retried.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Self::OutOfMemory { .. } | Self::TraversalTimeout { .. })
+        matches!(
+            self,
+            Self::OutOfMemory { .. } | Self::TraversalTimeout { .. }
+        )
     }
 }
 

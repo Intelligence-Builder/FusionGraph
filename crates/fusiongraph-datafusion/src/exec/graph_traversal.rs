@@ -79,7 +79,9 @@ impl DisplayAs for GraphTraversalExec {
                 write!(
                     f,
                     "GraphTraversalExec: algorithm={:?}, max_depth={}, starts={}",
-                    self.spec.algorithm, self.spec.max_depth, self.spec.start.len()
+                    self.spec.algorithm,
+                    self.spec.max_depth,
+                    self.spec.start.len()
                 )
             }
         }

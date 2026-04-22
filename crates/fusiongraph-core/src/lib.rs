@@ -1,13 +1,10 @@
 //! FusionGraph Core - High-performance graph kernel
 //!
-//! This crate currently provides the core graph data structures and APIs for:
+//! This crate provides the core graph data structures and algorithms:
 //! - CSR (Compressed Sparse Row) storage with micro-sharding
-//! - A delta layer for real-time updates
-//! - Breadth-first traversal (BFS)
-//!
-//! Planned extensions such as additional traversal algorithms (for example, DFS
-//! and Dijkstra) and epoch-based memory reclamation are not yet exposed through
-//! this crate's public API.
+//! - Lock-free delta layer for real-time updates
+//! - Traversal algorithms (BFS, DFS, Dijkstra)
+//! - Epoch-based memory reclamation
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

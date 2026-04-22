@@ -15,25 +15,27 @@ FusionGraph is a Zero-ETL graph execution layer that integrates Apache DataFusio
 
 ## Development Workflow
 
-### Starting Work on an Issue
+### WorkTeam Wrapper (Canonical Entry Point)
 
 ```bash
-# Create feature branch
-git checkout -b feature/issue-<N>-short-desc
+# Start work on an issue (creates branch, evidence bundle, runs preflight)
+./scripts/workteam.sh --mode devwork --issue <N>
 
-# Run tests before changes
-cargo test
+# Focus on specific crate
+./scripts/workteam.sh --mode devwork --issue <N> --focus-path crates/fusiongraph-core
 
-# Run clippy
-cargo clippy -- -D warnings
+# Dry-run to preview commands
+./scripts/workteam.sh --mode devwork --issue <N> --dry-run
 ```
 
 ### After Implementation
 
 ```bash
-# Test and lint
-cargo test
-cargo clippy -- -D warnings
+# Run QA readiness gate
+./scripts/workteam.sh --mode qa --issue <N>
+
+# Or run tests directly
+./scripts/workteam.sh --mode test --focus-path crates/fusiongraph-core
 
 # Commit with conventional format
 git commit -m "feat(crate): description
@@ -42,6 +44,19 @@ Closes #N"
 
 # Post commit reference to issue
 ./scripts/complete_issue.sh <N> <changed-files>
+```
+
+### Direct Script Access
+
+```bash
+# Start work on issue (branch + evidence bundle + preflight)
+./scripts/devwork.sh <N>
+
+# Run QA gate (tests + clippy + fmt + git checks)
+./scripts/qa_gate.sh <N>
+
+# Post commit reference
+./scripts/complete_issue.sh <N> <files>
 ```
 
 ### PR Checklist

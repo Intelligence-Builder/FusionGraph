@@ -47,7 +47,9 @@ pub enum OntologyError {
     },
 
     /// Type mismatch.
-    #[error("FG-ONT-E005: Cannot apply '{transform}' to column '{column}' of type '{column_type}'")]
+    #[error(
+        "FG-ONT-E005: Cannot apply '{transform}' to column '{column}' of type '{column_type}'"
+    )]
     TypeMismatch {
         /// Transform name.
         transform: String,
@@ -57,6 +59,19 @@ pub enum OntologyError {
         column_type: String,
     },
 
+    /// Computed property target is invalid.
+    #[error(
+        "FG-ONT-E007: Computed property '{property}' must target exactly one of node or edge (node={node:?}, edge={edge:?})"
+    )]
+    InvalidComputedPropertyTarget {
+        /// Computed property name.
+        property: String,
+        /// Referenced node label, if any.
+        node: Option<String>,
+        /// Referenced edge label, if any.
+        edge: Option<String>,
+    },
+
     /// IO error.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -64,13 +79,15 @@ pub enum OntologyError {
 
 impl OntologyError {
     /// Returns the error code.
-    pub fn code(&self) -> &'static str {
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
         match self {
             Self::ParseError { .. } | Self::JsonError { .. } => "FG-ONT-E001",
             Self::MissingField { .. } => "FG-ONT-E002",
             Self::DanglingEdge { .. } => "FG-ONT-E003",
             Self::DuplicateLabel { .. } => "FG-ONT-E004",
             Self::TypeMismatch { .. } => "FG-ONT-E005",
+            Self::InvalidComputedPropertyTarget { .. } => "FG-ONT-E007",
             Self::Io(_) => "FG-ONT-E006",
         }
     }

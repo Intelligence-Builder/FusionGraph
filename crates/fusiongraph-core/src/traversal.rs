@@ -1,6 +1,9 @@
 //! Graph traversal algorithms.
 //!
-//! Provides BFS, DFS, and shortest-path algorithms over CSR graphs.
+//! Currently provides breadth-first search over CSR graphs.
+//!
+//! The traversal specification already models additional algorithms, but DFS
+//! and shortest-path execution are reserved for future implementation.
 
 mod bfs;
 
@@ -57,6 +60,8 @@ pub struct TraversalSpec {
     /// Maximum number of nodes to visit.
     pub max_nodes: Option<usize>,
     /// Traversal algorithm.
+    ///
+    /// Only [`TraversalAlgorithm::Bfs`] is currently executed.
     pub algorithm: TraversalAlgorithm,
     /// Direction to traverse.
     pub direction: TraversalDirection,
@@ -79,9 +84,9 @@ impl Default for TraversalSpec {
 pub enum TraversalAlgorithm {
     /// Breadth-first search.
     Bfs,
-    /// Depth-first search.
+    /// Reserved for future depth-first search support.
     Dfs,
-    /// Dijkstra's shortest path (requires weighted graph).
+    /// Reserved for future shortest-path support.
     Dijkstra,
 }
 

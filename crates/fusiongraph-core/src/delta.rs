@@ -113,8 +113,8 @@ impl DeltaLayer {
 
     /// Returns approximate memory usage in bytes.
     pub fn memory_usage(&self) -> usize {
-        let insertion_size =
-            self.insertions.len() * (std::mem::size_of::<(NodeId, NodeId)>() + std::mem::size_of::<EdgeData>());
+        let insertion_size = self.insertions.len()
+            * (std::mem::size_of::<(NodeId, NodeId)>() + std::mem::size_of::<EdgeData>());
         let deletion_size = self.deletions.len() * std::mem::size_of::<(NodeId, NodeId)>();
         insertion_size + deletion_size + std::mem::size_of::<Self>()
     }

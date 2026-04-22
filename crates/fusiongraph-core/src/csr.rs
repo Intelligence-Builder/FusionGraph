@@ -9,6 +9,7 @@ mod shard;
 pub use builder::CsrBuilder;
 pub use shard::CsrShard;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::delta::DeltaLayer;
@@ -104,19 +105,7 @@ impl CsrGraph {
 
     /// Returns the out-degree of a node (number of outgoing edges).
     pub fn out_degree(&self, node: NodeId) -> usize {
-        let base_degree = self
-            .shard_for(node)
-            .map(|shard| {
-                let offset = node.as_u64() as usize - shard.node_range().start;
-                shard.out_degree(offset)
-            })
-            .unwrap_or(0);
-
-        // Account for delta layer
-        let delta_insertions = self.delta.insertion_count_for(node);
-        let delta_deletions = self.delta.deletion_count_for(node);
-
-        base_degree + delta_insertions - delta_deletions.min(base_degree)
+        self.neighbors(node).count()
     }
 
     /// Returns an iterator over the neighbors of a node.
@@ -126,6 +115,7 @@ impl CsrGraph {
             node,
             base_iter: self.base_neighbors(node),
             delta_iter: self.delta.neighbors(node),
+            base_seen: HashSet::new(),
         }
     }
 
@@ -234,6 +224,7 @@ pub struct NeighborIter<'a> {
     node: NodeId,
     base_iter: BaseNeighborIter<'a>,
     delta_iter: std::vec::IntoIter<NodeId>,
+    base_seen: HashSet<NodeId>,
 }
 
 impl Iterator for NeighborIter<'_> {
@@ -243,12 +234,15 @@ impl Iterator for NeighborIter<'_> {
         // First, yield base layer neighbors (skip tombstoned)
         for neighbor in self.base_iter.by_ref() {
             if !self.graph.delta.is_deleted(self.node, neighbor) {
+                self.base_seen.insert(neighbor);
                 return Some(neighbor);
             }
         }
 
         // Then yield delta insertions
-        self.delta_iter.next()
+        self.delta_iter
+            .by_ref()
+            .find(|neighbor| !self.base_seen.contains(neighbor))
     }
 }
 
@@ -290,5 +284,41 @@ mod tests {
             let recovered = graph.shard_to_global(shard_idx, offset);
             assert_eq!(recovered, Some(node));
         }
+    }
+
+    #[test]
+    fn neighbors_deduplicate_delta_edges_against_base() {
+        let graph = CsrGraph::from_edges(&[(0, 1), (0, 2)]);
+        graph
+            .delta()
+            .insert(NodeId::new(0), NodeId::new(2), Default::default());
+        graph
+            .delta()
+            .insert(NodeId::new(0), NodeId::new(3), Default::default());
+
+        let neighbors: Vec<_> = graph.neighbors(NodeId::new(0)).collect();
+
+        assert_eq!(
+            neighbors,
+            vec![NodeId::new(1), NodeId::new(2), NodeId::new(3)]
+        );
+    }
+
+    #[test]
+    fn out_degree_ignores_tombstones_for_non_base_edges() {
+        let graph = CsrGraph::from_edges(&[(0, 1), (0, 2)]);
+        graph.delta().delete(NodeId::new(0), NodeId::new(99));
+
+        assert_eq!(graph.out_degree(NodeId::new(0)), 2);
+    }
+
+    #[test]
+    fn out_degree_does_not_double_count_delta_duplicates() {
+        let graph = CsrGraph::from_edges(&[(0, 1)]);
+        graph
+            .delta()
+            .insert(NodeId::new(0), NodeId::new(1), Default::default());
+
+        assert_eq!(graph.out_degree(NodeId::new(0)), 1);
     }
 }

@@ -6,6 +6,10 @@ use crate::error::{OntologyError, Result};
 use crate::schema::Ontology;
 
 /// Parses an ontology from a TOML string.
+///
+/// # Errors
+///
+/// Returns [`OntologyError::ParseError`] when the content is not valid TOML.
 pub fn parse_toml(content: &str) -> Result<Ontology> {
     toml::from_str(content).map_err(|e| OntologyError::ParseError {
         message: e.to_string(),
@@ -13,6 +17,10 @@ pub fn parse_toml(content: &str) -> Result<Ontology> {
 }
 
 /// Parses an ontology from a JSON string.
+///
+/// # Errors
+///
+/// Returns [`OntologyError::JsonError`] when the content is not valid JSON.
 pub fn parse_json(content: &str) -> Result<Ontology> {
     serde_json::from_str(content).map_err(|e| OntologyError::JsonError {
         message: e.to_string(),
@@ -20,6 +28,11 @@ pub fn parse_json(content: &str) -> Result<Ontology> {
 }
 
 /// Parses an ontology from a file (auto-detects format).
+///
+/// # Errors
+///
+/// Returns IO errors when the file cannot be read, or parse errors when the
+/// file contents are neither valid TOML nor valid JSON.
 pub fn parse_file(path: &Path) -> Result<Ontology> {
     let content = std::fs::read_to_string(path)?;
 
@@ -35,16 +48,29 @@ pub fn parse_file(path: &Path) -> Result<Ontology> {
 
 impl Ontology {
     /// Parses from a TOML string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OntologyError::ParseError`] when the content is not valid TOML.
     pub fn from_toml(content: &str) -> Result<Self> {
         parse_toml(content)
     }
 
     /// Parses from a JSON string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OntologyError::JsonError`] when the content is not valid JSON.
     pub fn from_json(content: &str) -> Result<Self> {
         parse_json(content)
     }
 
     /// Loads from a file.
+    ///
+    /// # Errors
+    ///
+    /// Returns IO errors when the file cannot be read, or parse errors when the
+    /// file contents are neither valid TOML nor valid JSON.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         parse_file(path.as_ref())
     }

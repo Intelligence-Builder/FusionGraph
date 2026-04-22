@@ -24,31 +24,37 @@ pub struct Ontology {
 
 impl Ontology {
     /// Returns the ontology name.
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.ontology.name
     }
 
     /// Returns the ontology version.
+    #[must_use]
     pub fn version(&self) -> &str {
         &self.ontology.version
     }
 
     /// Returns node labels.
+    #[must_use]
     pub fn node_labels(&self) -> Vec<&str> {
         self.nodes.iter().map(|n| n.label.as_str()).collect()
     }
 
     /// Returns edge labels.
+    #[must_use]
     pub fn edge_labels(&self) -> Vec<&str> {
         self.edges.iter().map(|e| e.label.as_str()).collect()
     }
 
     /// Finds a node definition by label.
+    #[must_use]
     pub fn node(&self, label: &str) -> Option<&NodeDefinition> {
         self.nodes.iter().find(|n| n.label == label)
     }
 
     /// Finds an edge definition by label.
+    #[must_use]
     pub fn edge(&self, label: &str) -> Option<&EdgeDefinition> {
         self.edges.iter().find(|e| e.label == label)
     }
@@ -100,7 +106,7 @@ impl Default for OntologySettings {
     }
 }
 
-fn default_true() -> bool {
+const fn default_true() -> bool {
     true
 }
 
@@ -200,7 +206,7 @@ pub enum IdTransform {
 /// Edge definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeDefinition {
-    /// Edge label (e.g., "BELONGS_TO", "CAN_ASSUME").
+    /// Edge label (e.g., `"BELONGS_TO"`, `"CAN_ASSUME"`).
     pub label: String,
     /// Source table for edge data.
     pub source: String,
@@ -238,7 +244,7 @@ pub struct EdgeDefinition {
     pub partition_column: Option<String>,
 }
 
-fn default_weight() -> f64 {
+const fn default_weight() -> f64 {
     1.0
 }
 

@@ -5,6 +5,34 @@ use std::collections::HashSet;
 use crate::error::OntologyError;
 use crate::schema::Ontology;
 
+/// Structured validation error details for lossless error conversion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidationErrorKind {
+    /// Edge references an undefined node label.
+    DanglingEdge {
+        /// Label of the edge definition with the dangling reference.
+        edge: String,
+        /// Missing node label referenced by the edge.
+        node: String,
+    },
+    /// Duplicate node or edge label.
+    DuplicateLabel {
+        /// Duplicate label kind (`node` or `edge`).
+        kind: &'static str,
+        /// The duplicated label value.
+        label: String,
+    },
+    /// Computed property does not target exactly one graph object.
+    InvalidComputedPropertyTarget {
+        /// Computed property name.
+        property: String,
+        /// Referenced node label, if any.
+        node: Option<String>,
+        /// Referenced edge label, if any.
+        edge: Option<String>,
+    },
+}
+
 /// Validation error (blocking).
 #[derive(Debug, Clone)]
 pub struct ValidationError {
@@ -12,6 +40,8 @@ pub struct ValidationError {
     pub code: &'static str,
     /// Error message.
     pub message: String,
+    /// Structured validation context.
+    pub kind: ValidationErrorKind,
 }
 
 /// Validation warning (non-blocking).
@@ -46,6 +76,7 @@ impl ValidationResult {
 
 impl Ontology {
     /// Validates the ontology structure.
+    #[must_use]
     pub fn validate(&self) -> ValidationResult {
         let mut result = ValidationResult::default();
 
@@ -56,6 +87,10 @@ impl Ontology {
                 result.errors.push(ValidationError {
                     code: "FG-ONT-E004",
                     message: format!("Duplicate node label '{}'", node.label),
+                    kind: ValidationErrorKind::DuplicateLabel {
+                        kind: "node",
+                        label: node.label.clone(),
+                    },
                 });
             }
         }
@@ -67,6 +102,10 @@ impl Ontology {
                 result.errors.push(ValidationError {
                     code: "FG-ONT-E004",
                     message: format!("Duplicate edge label '{}'", edge.label),
+                    kind: ValidationErrorKind::DuplicateLabel {
+                        kind: "edge",
+                        label: edge.label.clone(),
+                    },
                 });
             }
         }
@@ -80,6 +119,10 @@ impl Ontology {
                         "Edge '{}' references undefined node '{}'",
                         edge.label, edge.from_node
                     ),
+                    kind: ValidationErrorKind::DanglingEdge {
+                        edge: edge.label.clone(),
+                        node: edge.from_node.clone(),
+                    },
                 });
             }
             if !node_labels.contains(&edge.to_node) {
@@ -89,6 +132,28 @@ impl Ontology {
                         "Edge '{}' references undefined node '{}'",
                         edge.label, edge.to_node
                     ),
+                    kind: ValidationErrorKind::DanglingEdge {
+                        edge: edge.label.clone(),
+                        node: edge.to_node.clone(),
+                    },
+                });
+            }
+        }
+
+        // Check computed properties target exactly one graph object
+        for property in &self.properties {
+            if property.node.is_some() == property.edge.is_some() {
+                result.errors.push(ValidationError {
+                    code: "FG-ONT-E007",
+                    message: format!(
+                        "Computed property '{}' must target exactly one of node or edge",
+                        property.name
+                    ),
+                    kind: ValidationErrorKind::InvalidComputedPropertyTarget {
+                        property: property.name.clone(),
+                        node: property.node.clone(),
+                        edge: property.edge.clone(),
+                    },
                 });
             }
         }
@@ -110,31 +175,42 @@ impl Ontology {
     }
 
     /// Validates and returns an error if invalid.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first blocking ontology validation error with its structured
+    /// context preserved.
     pub fn validate_or_error(&self) -> Result<(), OntologyError> {
         let result = self.validate();
-        if let Some(err) = result.errors.first() {
-            // Convert first error to OntologyError
-            if err.code == "FG-ONT-E003" {
-                // Parse edge and node from message
-                return Err(OntologyError::DanglingEdge {
-                    edge: "unknown".to_string(),
-                    node: "unknown".to_string(),
-                });
-            }
-            if err.code == "FG-ONT-E004" {
-                return Err(OntologyError::DuplicateLabel {
-                    kind: "node".to_string(),
-                    label: "unknown".to_string(),
-                });
-            }
-        }
-        Ok(())
+        let Some(err) = result.errors.first() else {
+            return Ok(());
+        };
+
+        Err(match &err.kind {
+            ValidationErrorKind::DanglingEdge { edge, node } => OntologyError::DanglingEdge {
+                edge: edge.clone(),
+                node: node.clone(),
+            },
+            ValidationErrorKind::DuplicateLabel { kind, label } => OntologyError::DuplicateLabel {
+                kind: (*kind).to_string(),
+                label: label.clone(),
+            },
+            ValidationErrorKind::InvalidComputedPropertyTarget {
+                property,
+                node,
+                edge,
+            } => OntologyError::InvalidComputedPropertyTarget {
+                property: property.clone(),
+                node: node.clone(),
+                edge: edge.clone(),
+            },
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::parse_toml;
+    use crate::{parser::parse_toml, OntologyError};
 
     const VALID_ONTOLOGY: &str = r#"
 [[nodes]]
@@ -231,5 +307,110 @@ valid_from_column = "event_time"
         assert!(result.is_valid()); // Still valid, just warns
         assert!(result.has_warnings());
         assert!(result.warnings.iter().any(|w| w.code == "FG-ONT-W002"));
+    }
+
+    #[test]
+    fn validate_or_error_preserves_dangling_edge_context() {
+        let toml = r#"
+[[nodes]]
+label = "User"
+source = "users"
+id_column = "id"
+
+[[edges]]
+label = "BELONGS_TO"
+source = "memberships"
+from_node = "User"
+from_column = "user_id"
+to_node = "Group"
+to_column = "group_id"
+"#;
+
+        let ontology = parse_toml(toml).unwrap();
+        let err = ontology.validate_or_error().unwrap_err();
+
+        assert!(matches!(
+            err,
+            OntologyError::DanglingEdge { edge, node }
+                if edge == "BELONGS_TO" && node == "Group"
+        ));
+    }
+
+    #[test]
+    fn validate_or_error_preserves_duplicate_label_context() {
+        let toml = r#"
+[[nodes]]
+label = "User"
+source = "users"
+id_column = "id"
+
+[[nodes]]
+label = "User"
+source = "users_archive"
+id_column = "id"
+"#;
+
+        let ontology = parse_toml(toml).unwrap();
+        let err = ontology.validate_or_error().unwrap_err();
+
+        assert!(matches!(
+            err,
+            OntologyError::DuplicateLabel { kind, label }
+                if kind == "node" && label == "User"
+        ));
+    }
+
+    #[test]
+    fn computed_property_with_both_targets_fails() {
+        let toml = r#"
+[[nodes]]
+label = "User"
+source = "users"
+id_column = "id"
+
+[[edges]]
+label = "BELONGS_TO"
+source = "memberships"
+from_node = "User"
+from_column = "user_id"
+to_node = "User"
+to_column = "manager_id"
+
+[[properties]]
+name = "weight"
+node = "User"
+edge = "BELONGS_TO"
+expression = "1"
+"#;
+
+        let ontology = parse_toml(toml).unwrap();
+        let err = ontology.validate_or_error().unwrap_err();
+
+        assert!(matches!(
+            err,
+            OntologyError::InvalidComputedPropertyTarget { property, node, edge }
+                if property == "weight"
+                    && node.as_deref() == Some("User")
+                    && edge.as_deref() == Some("BELONGS_TO")
+        ));
+    }
+
+    #[test]
+    fn computed_property_without_target_fails() {
+        let toml = r#"
+[[nodes]]
+label = "User"
+source = "users"
+id_column = "id"
+
+[[properties]]
+name = "risk_score"
+expression = "42"
+"#;
+
+        let ontology = parse_toml(toml).unwrap();
+        let result = ontology.validate();
+
+        assert!(result.errors.iter().any(|err| err.code == "FG-ONT-E007"));
     }
 }
