@@ -12,6 +12,10 @@
 # macOS
 .DS_Store
 
+# Workflow artifacts
+.code-foundry/
+scripts/
+
 # Test artifacts
 *.profraw
 *.profdata

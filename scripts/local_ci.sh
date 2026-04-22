@@ -15,6 +15,11 @@
 
 set -euo pipefail
 
+# Source cargo if not already in PATH
+if ! command -v cargo >/dev/null 2>&1 && [[ -n "${HOME:-}" && -f "${HOME:-}/.cargo/env" ]]; then
+    source "${HOME:-}/.cargo/env"
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 QUICK=0
 CARGO_ARGS=""
