@@ -857,6 +857,11 @@ jobs:
     services:
       minio:
         image: minio/minio
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          server /data
         ports:
           - 9000:9000
     steps:
