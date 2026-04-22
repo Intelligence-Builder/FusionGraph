@@ -334,7 +334,7 @@ mod datafusion_integration {
     use fusiongraph::GraphTableProvider;
 
     #[tokio::test]
-    async fn sql_triggers_graph_traversal() {
+    async fn sql_triggers_graph_traversal() -> Result<(), Box<dyn std::error::Error>> {
         let ctx = SessionContext::new();
         
         // Register test tables
@@ -363,10 +363,11 @@ mod datafusion_integration {
         assert!(!results.is_empty());
         let total_rows: usize = results.iter().map(|b| b.num_rows()).sum();
         assert!(total_rows > 0);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn explain_shows_graph_operators() {
+    async fn explain_shows_graph_operators() -> Result<(), Box<dyn std::error::Error>> {
         let ctx = setup_graph_context().await;
         
         let df = ctx.sql(r#"
@@ -380,6 +381,7 @@ mod datafusion_integration {
         
         assert!(plan_str.contains("GraphTraversalExec"));
         assert!(!plan_str.contains("HashJoinExec")); // Should not fall back to joins
+        Ok(())
     }
 }
 ```
@@ -392,7 +394,7 @@ mod iceberg_integration {
     use iceberg_rust::catalog::Catalog;
 
     #[tokio::test]
-    async fn manifest_pruning_skips_files() {
+    async fn manifest_pruning_skips_files() -> Result<(), Box<dyn std::error::Error>> {
         let catalog = setup_test_catalog().await;
         let ontology = Ontology::from_file("testdata/iam_graph.toml")?;
         
@@ -403,6 +405,7 @@ mod iceberg_integration {
         
         // Should skip 90%+ of files
         assert!(stats.files_skipped as f64 / stats.files_total as f64 > 0.9);
+        Ok(())
     }
 }
 ```
