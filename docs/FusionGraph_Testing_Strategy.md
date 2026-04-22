@@ -871,7 +871,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
-      - run: cargo miri test --lib ffi
+      - run: cargo miri test --lib -- ffi
 
   coverage:
     runs-on: ubuntu-latest
