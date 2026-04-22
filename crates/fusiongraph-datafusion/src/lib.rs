@@ -1,6 +1,6 @@
-//! FusionGraph DataFusion Integration
+//! `FusionGraph` `DataFusion` Integration
 //!
-//! This crate provides DataFusion integration for FusionGraph:
+//! This crate provides `DataFusion` integration for `FusionGraph`:
 //! - `GraphTableProvider` trait extending `TableProvider`
 //! - `CSRBuilderExec` physical operator
 //! - `GraphTraversalExec` physical operator
