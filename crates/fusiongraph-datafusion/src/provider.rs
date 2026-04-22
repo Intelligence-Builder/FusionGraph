@@ -1,4 +1,4 @@
-//! GraphTableProvider implementation.
+//! `GraphTableProvider` implementation.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use fusiongraph_core::{CsrGraph, GraphStatistics};
 use fusiongraph_ontology::Ontology;
 
-/// A TableProvider that exposes graph topology alongside relational data.
+/// A `TableProvider` that exposes graph topology alongside relational data.
 #[derive(Debug)]
 pub struct GraphTableProvider {
     ontology: Arc<Ontology>,
@@ -25,7 +25,8 @@ pub struct GraphTableProvider {
 }
 
 impl GraphTableProvider {
-    /// Creates a new GraphTableProvider with the given ontology.
+    /// Creates a new `GraphTableProvider` with the given ontology.
+    #[must_use]
     pub fn new(ontology: Ontology, schema: SchemaRef) -> Self {
         Self {
             ontology: Arc::new(ontology),
@@ -36,32 +37,38 @@ impl GraphTableProvider {
     }
 
     /// Returns the ontology schema.
+    #[must_use]
     pub fn ontology(&self) -> &Ontology {
         &self.ontology
     }
 
     /// Returns available node labels.
+    #[must_use]
     pub fn node_labels(&self) -> Vec<&str> {
         self.ontology.node_labels()
     }
 
     /// Returns available edge labels.
+    #[must_use]
     pub fn edge_labels(&self) -> Vec<&str> {
         self.ontology.edge_labels()
     }
 
     /// Returns true if the CSR is materialized.
-    pub fn is_materialized(&self) -> bool {
+    #[must_use]
+    pub const fn is_materialized(&self) -> bool {
         self.materialized
     }
 
     /// Returns graph statistics.
+    #[must_use]
     pub fn statistics(&self) -> GraphStatistics {
         self.graph.statistics()
     }
 
     /// Returns a reference to the underlying graph.
-    pub fn graph(&self) -> &Arc<CsrGraph> {
+    #[must_use]
+    pub const fn graph(&self) -> &Arc<CsrGraph> {
         &self.graph
     }
 }
