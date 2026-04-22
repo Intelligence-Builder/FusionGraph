@@ -289,33 +289,27 @@ impl Stream for CsrBuildStream {
             return Poll::Ready(None);
         }
 
-        // Poll input stream for more batches
-        loop {
-            match self.input.poll_next_unpin(cx) {
-                Poll::Ready(Some(Ok(batch))) => {
-                    if let Err(e) = self.extract_edges(&batch) {
-                        return Poll::Ready(Some(Err(e)));
-                    }
-                }
-                Poll::Ready(Some(Err(e))) => {
+        // Process at most one input batch per poll to avoid monopolizing the executor.
+        match self.input.poll_next_unpin(cx) {
+            Poll::Ready(Some(Ok(batch))) => {
+                if let Err(e) = self.extract_edges(&batch) {
                     return Poll::Ready(Some(Err(e)));
                 }
-                Poll::Ready(None) => {
-                    // Input exhausted, build CSR
-                    match self.build_csr() {
-                        Ok(batch) => {
-                            self.finished = true;
-                            return Poll::Ready(Some(Ok(batch)));
-                        }
-                        Err(e) => {
-                            return Poll::Ready(Some(Err(e)));
-                        }
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(None) => {
+                // Input exhausted, build CSR
+                match self.build_csr() {
+                    Ok(batch) => {
+                        self.finished = true;
+                        Poll::Ready(Some(Ok(batch)))
                     }
-                }
-                Poll::Pending => {
-                    return Poll::Pending;
+                    Err(e) => Poll::Ready(Some(Err(e))),
                 }
             }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
