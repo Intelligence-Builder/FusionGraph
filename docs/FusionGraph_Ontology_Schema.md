@@ -390,7 +390,8 @@ materialized = true
 ```rust
 // Rust API
 let ontology = Ontology::from_file("fusiongraph.toml")?;
-let provider = GraphTableProvider::new(catalog, ontology)?;
+// `GraphTableProvider` is a trait; construct a concrete implementation here.
+let provider = MyGraphTableProvider::new(catalog, ontology)?;
 ctx.register_table("graph", Arc::new(provider))?;
 ```
 
