@@ -850,7 +850,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --test '*'
+      - run: cargo test --tests
 
   integration:
     runs-on: ubuntu-latest
