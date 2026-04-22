@@ -2,6 +2,26 @@ This comprehensive technical blueprint expands the **FusionGraph** workstreams i
 
 ### ---
 
+## Task Dependencies & Recommended Phase Order
+
+While workstreams are presented thematically, tasks have hard dependencies that must be respected:
+
+| Task | Depends On |
+|------|------------|
+| 2.1 CSRBuilderExec | 1.1 CSRShard, 3.2 Arrow FFI |
+| 2.2 GraphTraversalExec | 1.2 SIMD BFS, 2.1 CSRBuilderExec |
+| 3.2 Arrow FFI | 1.1 CSRShard |
+
+**Recommended Implementation Phases:**
+
+1. **Phase 1 (Foundation):** Task 1.1 (CSRShard) - prerequisite for all graph operations
+2. **Phase 2 (Data Bridge):** Task 3.2 (Arrow FFI) - enables zero-copy data flow
+3. **Phase 3 (Build Operator):** Task 2.1 (CSRBuilderExec) - requires CSRShard + Arrow FFI
+4. **Phase 4 (Traversal):** Task 1.2 (SIMD BFS) + Task 2.2 (GraphTraversalExec) - can proceed in parallel once 2.1 complete
+5. **Phase 5 (Concurrent):** Tasks 1.3 (EBR), 1.4 (LSM Delta), 2.3 (Optimizer Rule) - independent of each other
+
+### ---
+
 **Workstream 1: Core Kernel & Memory (Low-Level Systems)**
 
 *Focus: Implementing the high-speed CSR topology and LSM-style mutability.*
