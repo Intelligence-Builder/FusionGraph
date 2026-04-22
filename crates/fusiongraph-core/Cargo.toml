@@ -1,0 +1,31 @@
+[package]
+name = "fusiongraph-core"
+description = "Core graph kernel: CSR storage, traversal algorithms, delta layer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+arrow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+crossbeam-epoch = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[features]
+default = []
+simd = []  # Enable SIMD optimizations
+
+[lints]
+workspace = true
+

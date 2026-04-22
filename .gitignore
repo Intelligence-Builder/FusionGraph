@@ -1,0 +1,25 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Test artifacts
+*.profraw
+*.profdata
+lcov.info
+
+# Benchmark artifacts
+criterion/
+
+# Fuzz artifacts
+fuzz/artifacts/
+fuzz/corpus/

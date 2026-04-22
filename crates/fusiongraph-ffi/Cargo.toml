@@ -1,0 +1,26 @@
+[package]
+name = "fusiongraph-ffi"
+description = "Arrow C Data Interface and FFI bindings for FusionGraph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+fusiongraph-core = { workspace = true }
+
+arrow = { workspace = true, features = ["ffi"] }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true
