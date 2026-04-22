@@ -9,11 +9,9 @@ mod shard;
 pub use builder::CsrBuilder;
 pub use shard::CsrShard;
 
-use std::ops::Range;
 use std::sync::Arc;
 
 use crate::delta::DeltaLayer;
-use crate::error::{GraphError, Result};
 use crate::types::{GraphStatistics, NodeId};
 
 /// Default shard size: 64MB.

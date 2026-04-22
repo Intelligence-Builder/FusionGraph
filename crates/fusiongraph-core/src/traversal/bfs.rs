@@ -118,6 +118,7 @@ pub fn bfs(graph: &CsrGraph, start: NodeId, max_depth: u32) -> BfsResult {
 }
 
 /// Performs BFS from multiple starting nodes simultaneously.
+#[allow(dead_code)]
 pub fn bfs_multi(graph: &CsrGraph, starts: &[NodeId], max_depth: u32) -> BfsResult {
     let mut visited_set: HashSet<NodeId> = HashSet::new();
     let mut visited: Vec<NodeId> = Vec::new();

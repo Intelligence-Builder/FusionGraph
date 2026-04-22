@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+use datafusion::catalog::Session;
 use datafusion::catalog::TableProvider;
 use datafusion::datasource::TableType;
 use datafusion::error::Result;
-use datafusion::execution::context::SessionState;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 
@@ -82,13 +82,12 @@ impl TableProvider for GraphTableProvider {
 
     async fn scan(
         &self,
-        _state: &SessionState,
+        _state: &dyn Session,
         _projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // TODO: Implement graph-aware scanning
-        // For now, return an error indicating this needs implementation
         Err(datafusion::error::DataFusionError::NotImplemented(
             "GraphTableProvider::scan not yet implemented".to_string(),
         ))

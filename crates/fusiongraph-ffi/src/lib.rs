@@ -5,12 +5,14 @@
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
+#![allow(unsafe_code)] // FFI requires unsafe
 
-use std::ffi::{c_char, CStr};
+use std::ffi::c_char;
 use std::sync::Arc;
 
-use arrow::array::RecordBatch;
-use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
+use arrow::array::{make_array, Array, RecordBatch, StructArray};
+use arrow::datatypes::{Field, Schema};
+use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray, FFI_ArrowSchema};
 use thiserror::Error;
 
 /// FFI error types.
@@ -35,40 +37,39 @@ pub enum FfiError {
 /// Result type for FFI operations.
 pub type Result<T> = std::result::Result<T, FfiError>;
 
-/// Imports a RecordBatch from Arrow C Data Interface pointers.
+/// Imports a RecordBatch from Arrow C Data Interface structs.
 ///
 /// # Safety
 ///
 /// The caller must ensure that:
-/// - `array` and `schema` are valid pointers to Arrow C Data Interface structs
-/// - The memory referenced by these pointers remains valid for the duration of this call
-/// - Ownership of the data is transferred to this function
+/// - `array` and `schema` are valid Arrow C Data Interface structs
+/// - Ownership is transferred to this function (structs will be consumed)
 pub unsafe fn import_record_batch(
-    array: *const FFI_ArrowArray,
-    schema: *const FFI_ArrowSchema,
+    array: FFI_ArrowArray,
+    schema: &FFI_ArrowSchema,
 ) -> Result<RecordBatch> {
-    if array.is_null() {
-        return Err(FfiError::NullPointer {
-            function: "import_record_batch",
-        });
-    }
-    if schema.is_null() {
-        return Err(FfiError::NullPointer {
-            function: "import_record_batch",
-        });
-    }
+    // Import using Arrow's FFI - returns ArrayData
+    let array_data = from_ffi(array, schema)?;
 
-    // Import the schema
-    let schema = arrow::ffi::import_schema(schema)?;
+    // Convert ArrayData to Array
+    let array = make_array(array_data);
 
-    // Import the array
-    let array = arrow::ffi::import_array(array, schema.clone())?;
+    // The imported data should be a struct array for RecordBatch
+    let struct_array = array
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .ok_or(FfiError::InvalidSchema)?;
 
-    // Convert to RecordBatch
-    let batch = RecordBatch::try_new(
-        Arc::new(schema),
-        array.struct_array().columns().to_vec(),
-    )?;
+    // Build schema from struct fields
+    let fields: Vec<Field> = struct_array
+        .fields()
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
+    let schema = Arc::new(Schema::new(fields));
+
+    // Build RecordBatch
+    let batch = RecordBatch::try_new(schema, struct_array.columns().to_vec())?;
 
     Ok(batch)
 }
@@ -77,11 +78,10 @@ pub unsafe fn import_record_batch(
 ///
 /// Returns the array and schema as FFI structs. The caller is responsible
 /// for eventually releasing the memory.
-pub fn export_record_batch(
-    batch: &RecordBatch,
-) -> Result<(FFI_ArrowArray, FFI_ArrowSchema)> {
-    let struct_array = arrow::array::StructArray::from(batch.clone());
-    let (array, schema) = arrow::ffi::to_ffi(&struct_array)?;
+pub fn export_record_batch(batch: &RecordBatch) -> Result<(FFI_ArrowArray, FFI_ArrowSchema)> {
+    let struct_array = StructArray::from(batch.clone());
+    let data = struct_array.to_data();
+    let (array, schema) = to_ffi(&data)?;
     Ok((array, schema))
 }
 
@@ -114,7 +114,7 @@ pub struct FusionGraphStats {
 mod tests {
     use super::*;
     use arrow::array::{Int64Array, StringArray};
-    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::datatypes::DataType;
 
     fn create_test_batch() -> RecordBatch {
         let schema = Schema::new(vec![
@@ -125,11 +125,14 @@ mod tests {
         let ids = Int64Array::from(vec![1, 2, 3]);
         let names = StringArray::from(vec!["a", "b", "c"]);
 
-        RecordBatch::try_new(
-            Arc::new(schema),
-            vec![Arc::new(ids), Arc::new(names)],
-        )
-        .unwrap()
+        RecordBatch::try_new(Arc::new(schema), vec![Arc::new(ids), Arc::new(names)]).unwrap()
+    }
+
+    #[test]
+    fn export_succeeds() {
+        let batch = create_test_batch();
+        let result = export_record_batch(&batch);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -137,13 +140,9 @@ mod tests {
         let original = create_test_batch();
         let (array, schema) = export_record_batch(&original).unwrap();
 
-        // Import back - in real usage, these would be passed across FFI
-        let imported = unsafe {
-            import_record_batch(&array as *const _, &schema as *const _)
-        };
+        let imported = unsafe { import_record_batch(array, &schema) }.unwrap();
 
-        // Note: Full roundtrip test would require more setup
-        // This verifies the export doesn't panic
-        assert!(imported.is_ok() || imported.is_err()); // Either is valid for this test
+        assert_eq!(original.num_rows(), imported.num_rows());
+        assert_eq!(original.num_columns(), imported.num_columns());
     }
 }

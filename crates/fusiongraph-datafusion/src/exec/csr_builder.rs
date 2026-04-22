@@ -7,12 +7,11 @@ use std::sync::Arc;
 use arrow_schema::SchemaRef;
 use datafusion::execution::TaskContext;
 use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
     SendableRecordBatchStream,
 };
-
-use fusiongraph_core::CsrGraph;
 
 /// Configuration for CSR building.
 #[derive(Debug, Clone)]
@@ -55,7 +54,8 @@ impl CSRBuilderExec {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(Arc::clone(&schema)),
             Partitioning::UnknownPartitioning(1),
-            datafusion::physical_plan::ExecutionMode::Bounded,
+            EmissionType::Final,
+            Boundedness::Bounded,
         );
 
         Self {

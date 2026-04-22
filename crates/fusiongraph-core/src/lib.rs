@@ -19,4 +19,4 @@ pub use csr::{CsrGraph, CsrShard};
 pub use delta::DeltaLayer;
 pub use error::GraphError;
 pub use traversal::{bfs, TraversalResult};
-pub use types::{EdgeId, NodeId};
+pub use types::{EdgeId, GraphStatistics, NodeId};

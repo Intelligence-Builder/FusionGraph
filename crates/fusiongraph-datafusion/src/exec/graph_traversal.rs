@@ -7,13 +7,14 @@ use std::sync::Arc;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::execution::TaskContext;
 use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
     SendableRecordBatchStream,
 };
 
-use fusiongraph_core::traversal::{TraversalAlgorithm, TraversalDirection, TraversalSpec};
-use fusiongraph_core::{CsrGraph, NodeId};
+use fusiongraph_core::traversal::TraversalSpec;
+use fusiongraph_core::CsrGraph;
 
 /// Physical operator for executing graph traversals.
 #[derive(Debug)]
@@ -35,7 +36,8 @@ impl GraphTraversalExec {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(Arc::clone(&schema)),
             Partitioning::UnknownPartitioning(1),
-            datafusion::physical_plan::ExecutionMode::Bounded,
+            EmissionType::Final,
+            Boundedness::Bounded,
         );
 
         Self {
@@ -51,7 +53,11 @@ impl GraphTraversalExec {
         Arc::new(Schema::new(vec![
             Field::new("node_id", DataType::UInt64, false),
             Field::new("depth", DataType::UInt32, false),
-            Field::new("path", DataType::List(Arc::new(Field::new("item", DataType::UInt64, false))), true),
+            Field::new(
+                "path",
+                DataType::List(Arc::new(Field::new("item", DataType::UInt64, false))),
+                true,
+            ),
         ]))
     }
 
@@ -73,9 +79,7 @@ impl DisplayAs for GraphTraversalExec {
                 write!(
                     f,
                     "GraphTraversalExec: algorithm={:?}, max_depth={}, starts={}",
-                    self.spec.algorithm,
-                    self.spec.max_depth,
-                    self.spec.start.len()
+                    self.spec.algorithm, self.spec.max_depth, self.spec.start.len()
                 )
             }
         }

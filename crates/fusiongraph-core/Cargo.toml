@@ -29,6 +29,3 @@ simd = []  # Enable SIMD optimizations
 [lints]
 workspace = true
 
-[[bench]]
-name = "traversal"
-harness = false
