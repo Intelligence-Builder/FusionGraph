@@ -1,7 +1,7 @@
 //! Error types for FusionGraph core operations.
 //!
 //! Error codes follow the format: `FG-{SUBSYSTEM}-{SEVERITY}{NUMBER}`
-//! - Subsystems: ONT, CSR, DLT, TRV, FFI, MEM
+//! - Subsystems: ONT, CSR, DLT, TRV, FFI, MEM, SYS
 //! - Severity: F (Fatal), E (Error), W (Warning)
 
 use thiserror::Error;
