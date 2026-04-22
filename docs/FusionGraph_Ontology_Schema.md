@@ -75,7 +75,7 @@ filter = "status = 'active'"
 label = "Resource"
 source = "iceberg.aws.resources"
 id_column = ["account_id", "resource_arn"]   # Composite key
-id_separator = "::"                           # Yields "123456::arn:aws:s3:::bucket"
+separator = "::"                              # Composite ID separator; yields "123456::arn:aws:s3:::bucket"
 properties = ["resource_type", "region"]
 ```
 
