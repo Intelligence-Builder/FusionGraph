@@ -289,12 +289,6 @@ impl Stream for CsrBuildStream {
             return Poll::Ready(None);
         }
 
-        // If we have a result ready, return it
-        if let Some(batch) = self.result.take() {
-            self.finished = true;
-            return Poll::Ready(Some(Ok(batch)));
-        }
-
         // Poll input stream for more batches
         loop {
             match self.input.poll_next_unpin(cx) {
