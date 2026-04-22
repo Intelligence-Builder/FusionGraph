@@ -1,6 +1,6 @@
-//! FusionGraph FFI - Arrow C Data Interface bindings.
+//! `FusionGraph` FFI - Arrow C Data Interface bindings.
 //!
-//! Provides zero-copy data transfer between FusionGraph and external systems
+//! Provides zero-copy data transfer between `FusionGraph` and external systems
 //! using the Arrow C Data Interface.
 
 #![warn(missing_docs)]
@@ -22,7 +22,7 @@ pub enum FfiError {
     #[error("FG-FFI-E001: Arrow error: {0}")]
     Arrow(#[from] arrow::error::ArrowError),
 
-    /// Null pointer passed to FFI function.
+    /// Null pointer passed to an FFI function.
     #[error("FG-FFI-E002: Null pointer passed to {function}")]
     NullPointer {
         /// Function name.
@@ -37,13 +37,19 @@ pub enum FfiError {
 /// Result type for FFI operations.
 pub type Result<T> = std::result::Result<T, FfiError>;
 
-/// Imports a RecordBatch from Arrow C Data Interface structs.
+/// Imports a `RecordBatch` from Arrow C Data Interface structs.
 ///
 /// # Safety
 ///
 /// The caller must ensure that:
 /// - `array` and `schema` are valid Arrow C Data Interface structs
 /// - Ownership is transferred to this function (structs will be consumed)
+///
+/// # Errors
+///
+/// Returns [`FfiError::Arrow`] when Arrow fails to import the FFI data and
+/// [`FfiError::InvalidSchema`] when the imported payload is not a struct-backed
+/// record batch.
 pub unsafe fn import_record_batch(
     array: FFI_ArrowArray,
     schema: &FFI_ArrowSchema,
@@ -74,10 +80,15 @@ pub unsafe fn import_record_batch(
     Ok(batch)
 }
 
-/// Exports a RecordBatch to Arrow C Data Interface format.
+/// Exports a `RecordBatch` to Arrow C Data Interface format.
 ///
 /// Returns the array and schema as FFI structs. The caller is responsible
 /// for eventually releasing the memory.
+///
+/// # Errors
+///
+/// Returns [`FfiError::Arrow`] when Arrow fails to materialize the FFI view for
+/// the provided batch.
 pub fn export_record_batch(batch: &RecordBatch) -> Result<(FFI_ArrowArray, FFI_ArrowSchema)> {
     let struct_array = StructArray::from(batch.clone());
     let data = struct_array.to_data();
