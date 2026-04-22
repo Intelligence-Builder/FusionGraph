@@ -1,4 +1,4 @@
-//! GraphTraversalExec - Physical operator for graph traversals.
+//! `GraphTraversalExec` - Physical operator for graph traversals.
 
 use std::any::Any;
 use std::fmt;
@@ -30,7 +30,8 @@ pub struct GraphTraversalExec {
 }
 
 impl GraphTraversalExec {
-    /// Creates a new GraphTraversalExec.
+    /// Creates a new `GraphTraversalExec`.
+    #[must_use]
     pub fn new(graph: Arc<CsrGraph>, spec: TraversalSpec) -> Self {
         let schema = Self::output_schema();
         let properties = PlanProperties::new(
@@ -62,12 +63,14 @@ impl GraphTraversalExec {
     }
 
     /// Returns the traversal specification.
-    pub fn spec(&self) -> &TraversalSpec {
+    #[must_use]
+    pub const fn spec(&self) -> &TraversalSpec {
         &self.spec
     }
 
     /// Returns a reference to the graph.
-    pub fn graph(&self) -> &Arc<CsrGraph> {
+    #[must_use]
+    pub const fn graph(&self) -> &Arc<CsrGraph> {
         &self.graph
     }
 }
@@ -89,7 +92,7 @@ impl DisplayAs for GraphTraversalExec {
 }
 
 impl ExecutionPlan for GraphTraversalExec {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "GraphTraversalExec"
     }
 

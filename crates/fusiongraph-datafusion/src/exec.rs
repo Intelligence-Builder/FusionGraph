@@ -1,4 +1,4 @@
-//! Physical execution operators for FusionGraph.
+//! Physical execution operators for `FusionGraph`.
 
 mod csr_builder;
 mod graph_traversal;

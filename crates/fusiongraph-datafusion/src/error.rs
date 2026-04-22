@@ -1,8 +1,8 @@
-//! DataFusion integration errors.
+//! `DataFusion` integration errors.
 
 use thiserror::Error;
 
-/// Errors from DataFusion integration.
+/// Errors from `DataFusion` integration.
 #[derive(Error, Debug)]
 pub enum DataFusionError {
     /// Graph error.
@@ -13,7 +13,7 @@ pub enum DataFusionError {
     #[error("Ontology error: {0}")]
     Ontology(#[from] fusiongraph_ontology::OntologyError),
 
-    /// DataFusion error.
+    /// `DataFusion` error.
     #[error("DataFusion error: {0}")]
     DataFusion(#[from] datafusion::error::DataFusionError),
 
