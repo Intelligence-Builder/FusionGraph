@@ -16,6 +16,9 @@
 
 set -euo pipefail
 
+# Source cargo if not in PATH
+[[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 REPO="Intelligence-Builder/FusionGraph"
 
