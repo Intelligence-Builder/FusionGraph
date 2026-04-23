@@ -90,3 +90,17 @@ Changed-package QA was used for branches touching multiple Rust packages.
 - Complete `.code-foundry/issues/11/discovery.md`; it still contains `_(answer here)_` placeholders.
 - Run `cargo fmt` and commit the formatting changes shown by QA in `crates/fusiongraph-core/src/error.rs` and `crates/fusiongraph-datafusion/src/exec/csr_builder.rs`.
 - Rerun the exact #11 command above with a clean working tree; expected result is `Passed 6 / Failed 0 / Warnings 0`.
+
+## Issue #11 Devwork Follow-Up
+
+#11 was updated on 2026-04-23 and is ready for the next QA sweep.
+
+| Issue | Branch head | Command | Result | Board update |
+| --- | --- | --- | --- | --- |
+| #11 | `feat/11-circuit-breaker` @ `5432f38` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 11 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Review` |
+
+Follow-up changes:
+
+- Completed `.code-foundry/issues/11/discovery.md` with implementation, test, risk, changed-file, and QA-result evidence.
+- Committed the formatting changes previously reported by QA.
+- Added the QA-proven core strict-Clippy cleanup so touching `fusiongraph-core` no longer re-exposes repo-wide Clippy blockers during the #11 gate.
