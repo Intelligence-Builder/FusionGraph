@@ -1,4 +1,6 @@
-//! Core type definitions for FusionGraph.
+//! Core type definitions for `FusionGraph`.
+
+#![allow(clippy::must_use_candidate)]
 
 use std::fmt;
 
@@ -7,7 +9,7 @@ use std::fmt;
 pub struct NodeId(pub u64);
 
 impl NodeId {
-    /// Creates a new NodeId from a u64 value.
+    /// Creates a new `NodeId` from a `u64` value.
     #[inline]
     pub const fn new(id: u64) -> Self {
         Self(id)
@@ -43,7 +45,7 @@ impl From<u32> for NodeId {
 pub struct EdgeId(pub u64);
 
 impl EdgeId {
-    /// Creates a new EdgeId from a u64 value.
+    /// Creates a new `EdgeId` from a `u64` value.
     #[inline]
     pub const fn new(id: u64) -> Self {
         Self(id)

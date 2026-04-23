@@ -339,12 +339,16 @@ impl Stream for CsrBuildStream {
         match self.input.poll_next_unpin(cx) {
             Poll::Ready(Some(Ok(batch))) => {
                 if let Err(e) = self.extract_edges(&batch) {
+                    self.finished = true;
                     return Poll::Ready(Some(Err(e)));
                 }
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(Some(Err(e))) => {
+                self.finished = true;
+                Poll::Ready(Some(Err(e)))
+            }
             Poll::Ready(None) => {
                 // Input exhausted, build CSR.
                 match self.build_csr() {
@@ -352,7 +356,10 @@ impl Stream for CsrBuildStream {
                         self.finished = true;
                         Poll::Ready(Some(Ok(batch)))
                     }
-                    Err(e) => Poll::Ready(Some(Err(e))),
+                    Err(e) => {
+                        self.finished = true;
+                        Poll::Ready(Some(Err(e)))
+                    }
                 }
             }
             Poll::Pending => Poll::Pending,
@@ -518,6 +525,7 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Source column 'src' not found in input schema"));
+        assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]
@@ -537,6 +545,7 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Source column 'source' must be UInt64"));
+        assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]
@@ -560,6 +569,7 @@ mod tests {
         assert!(err
             .to_string()
             .contains("edge buffer exceeded memory limit"));
+        assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]
@@ -617,13 +627,12 @@ mod tests {
         let schema = batch1.schema();
 
         // Combine batches into single partition (required by CSRBuilderExec)
-        let input = Arc::new(
-            MemoryExec::try_new(&[vec![batch1, batch2, batch3]], schema, None).unwrap(),
-        );
+        let input =
+            Arc::new(MemoryExec::try_new(&[vec![batch1, batch2, batch3]], schema, None).unwrap());
 
         let config = CsrBuildConfig {
             shard_size: 64 * 1024 * 1024,
-            ..Default::default()
+            ..CsrBuildConfig::default()
         };
         let builder = CSRBuilderExec::new(input, config);
 
@@ -666,8 +675,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_csr_builder_verify_graph_structure() {
-        // Verify the built CSR graph has correct neighbor relationships
+    async fn test_csr_builder_reports_graph_metadata() {
+        // Verify the built CSR graph reports the expected node and shard metadata
         let batch = create_edge_batch(vec![0, 0, 1, 2], vec![1, 2, 2, 3]);
         let schema = batch.schema();
 

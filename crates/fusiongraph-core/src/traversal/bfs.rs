@@ -96,8 +96,7 @@ pub fn bfs(graph: &CsrGraph, start: NodeId, max_depth: u32) -> BfsResult {
         for neighbor in graph.neighbors(node) {
             edges_examined += 1;
 
-            if !visited_set.contains(&neighbor) {
-                visited_set.insert(neighbor);
+            if visited_set.insert(neighbor) {
                 queue.push_back((neighbor, depth + 1));
             }
         }
@@ -130,9 +129,8 @@ pub fn bfs_multi(graph: &CsrGraph, starts: &[NodeId], max_depth: u32) -> BfsResu
 
     // Initialize with all start nodes at depth 0
     for &start in starts {
-        if graph.contains(start) && !visited_set.contains(&start) {
+        if graph.contains(start) && visited_set.insert(start) {
             queue.push_back((start, 0));
-            visited_set.insert(start);
         }
     }
 
@@ -156,8 +154,7 @@ pub fn bfs_multi(graph: &CsrGraph, starts: &[NodeId], max_depth: u32) -> BfsResu
         for neighbor in graph.neighbors(node) {
             edges_examined += 1;
 
-            if !visited_set.contains(&neighbor) {
-                visited_set.insert(neighbor);
+            if visited_set.insert(neighbor) {
                 queue.push_back((neighbor, depth + 1));
             }
         }

@@ -1,8 +1,10 @@
-//! Error types for FusionGraph core operations.
+//! Error types for `FusionGraph` core operations.
 //!
 //! Error codes follow the format: `FG-{SUBSYSTEM}-{SEVERITY}{NUMBER}`
 //! - Subsystems: ONT, CSR, DLT, TRV, FFI, MEM, SYS
 //! - Severity: F (Fatal), E (Error), W (Warning)
+
+#![allow(clippy::missing_const_for_fn, clippy::must_use_candidate)]
 
 use thiserror::Error;
 
@@ -71,7 +73,9 @@ pub enum GraphError {
     },
 
     /// CSR shard corruption detected.
-    #[error("FG-CSR-F001: Memory corruption in shard {shard_id} (checksum {expected:x} != {actual:x})")]
+    #[error(
+        "FG-CSR-F001: Memory corruption in shard {shard_id} (checksum {expected:x} != {actual:x})"
+    )]
     ShardCorruption {
         /// The corrupted shard ID.
         shard_id: u32,
@@ -252,7 +256,10 @@ mod tests {
 
         for err in errors {
             let code = err.code();
-            assert!(code.starts_with("FG-"), "Code should start with FG-: {code}");
+            assert!(
+                code.starts_with("FG-"),
+                "Code should start with FG-: {code}"
+            );
             assert!(code.len() >= 10, "Code should be at least 10 chars: {code}");
         }
     }
