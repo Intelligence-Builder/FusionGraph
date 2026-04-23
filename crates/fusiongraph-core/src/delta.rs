@@ -219,12 +219,12 @@ mod tests {
         let delta = Arc::new(DeltaLayer::new());
         let mut handles = vec![];
 
-        for t in 0..4 {
+        for t in 0u64..4 {
             let delta = Arc::clone(&delta);
             handles.push(thread::spawn(move || {
-                for i in 0..1000 {
-                    let from = NodeId((t * 1000 + i) as u64);
-                    let to = NodeId(i as u64);
+                for i in 0u64..1000 {
+                    let from = NodeId(t * 1000 + i);
+                    let to = NodeId(i);
                     delta.insert(from, to, EdgeData::default());
                 }
             }));
