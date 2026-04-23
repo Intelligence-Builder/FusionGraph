@@ -16,7 +16,7 @@ Warm: Recently accessed subgraphs in local NVMe/Page Cache.
 Cold: Raw Iceberg data in S3/Snowflake.
 
 The advantages of FusionGraph stem from its unique "Fused Execution" architecture, which treats the data lakehouse as a high-performance virtual memory space rather than a static repository.
-Here are the primary benefits and "best things" about the FusionGraph design:
+Here are the primary benefits of the FusionGraph design:
 1. Zero-ETL Performance: By projecting graph topology directly from Iceberg and Parquet files, FusionGraph eliminates the "Data Movement Tax." You no longer need to manage complex pipelines to move data from your lakehouse into a specialized graph database.
 
 2. Sub-Millisecond Traversal Speeds: Despite reading from a data lake, the kernel achieves the speed of a dedicated in-memory database like Memgraph. By utilizing CSR-in-RAM structures, it replaces slow $O(\log N)$ relational joins with $O(1)$ array indexing.
