@@ -32,6 +32,10 @@ pub struct CsrGraph {
 }
 
 impl CsrGraph {
+    fn node_index(node: NodeId) -> Option<usize> {
+        usize::try_from(node.as_u64()).ok()
+    }
+
     /// Creates an empty graph.
     pub fn empty() -> Self {
         Self {
@@ -45,6 +49,11 @@ impl CsrGraph {
     /// Creates a graph from a list of edges.
     ///
     /// This is primarily for testing. For production use, use [`CsrBuilder`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `edges` contains values that violate the invariants enforced
+    /// by [`CsrBuilder::build`].
     pub fn from_edges(edges: &[(u64, u64)]) -> Self {
         CsrBuilder::new()
             .with_edges(edges.iter().copied())
@@ -73,7 +82,7 @@ impl CsrGraph {
     /// Returns true if the graph contains the given node.
     #[inline]
     pub fn contains(&self, node: NodeId) -> bool {
-        (node.as_u64() as usize) < self.node_count
+        Self::node_index(node).is_some_and(|id| id < self.node_count)
     }
 
     /// Returns the shard containing the given node.
@@ -82,10 +91,10 @@ impl CsrGraph {
         self.shards.get(shard_idx)
     }
 
-    /// Converts a global NodeId to (shard_index, local_offset).
+    /// Converts a global `NodeId` to (`shard_index`, `local_offset`).
     #[inline]
     pub fn global_to_shard(&self, node: NodeId) -> Option<(usize, usize)> {
-        let id = node.as_u64() as usize;
+        let id = Self::node_index(node)?;
         for (idx, shard) in self.shards.iter().enumerate() {
             if shard.contains(id) {
                 return Some((idx, id - shard.node_range().start));
@@ -94,12 +103,12 @@ impl CsrGraph {
         None
     }
 
-    /// Converts (shard_index, local_offset) to a global NodeId.
+    /// Converts (`shard_index`, `local_offset`) to a global `NodeId`.
     #[inline]
     pub fn shard_to_global(&self, shard_idx: usize, offset: usize) -> Option<NodeId> {
-        self.shards.get(shard_idx).map(|shard| {
+        self.shards.get(shard_idx).and_then(|shard| {
             let global = shard.node_range().start + offset;
-            NodeId::new(global as u64)
+            u64::try_from(global).ok().map(NodeId::new)
         })
     }
 
@@ -121,12 +130,13 @@ impl CsrGraph {
 
     /// Returns an iterator over base layer neighbors only.
     fn base_neighbors(&self, node: NodeId) -> BaseNeighborIter<'_> {
-        if let Some(shard) = self.shard_for(node) {
-            let offset = node.as_u64() as usize - shard.node_range().start;
-            BaseNeighborIter::new(shard, offset)
-        } else {
-            BaseNeighborIter::empty()
-        }
+        self.global_to_shard(node)
+            .and_then(|(shard_idx, offset)| {
+                self.shards
+                    .get(shard_idx)
+                    .map(|shard| BaseNeighborIter::new(shard, offset))
+            })
+            .unwrap_or_else(BaseNeighborIter::empty)
     }
 
     /// Checks if an edge exists between two nodes.
@@ -204,7 +214,7 @@ impl Iterator for BaseNeighborIter<'_> {
             let shard = self.shard?;
             let neighbor = shard.col_index(self.current)?;
             self.current += 1;
-            Some(NodeId::new(neighbor as u64))
+            Some(NodeId::from(neighbor))
         } else {
             None
         }
@@ -272,8 +282,7 @@ mod tests {
     #[test]
     fn neighbors_iteration() {
         let graph = CsrGraph::from_edges(&[(0, 1), (0, 2), (0, 3)]);
-        let neighbors: Vec<_> = graph.neighbors(NodeId::new(0)).collect();
-        assert_eq!(neighbors.len(), 3);
+        assert_eq!(graph.neighbors(NodeId::new(0)).count(), 3);
     }
 
     #[test]
@@ -289,12 +298,16 @@ mod tests {
     #[test]
     fn neighbors_deduplicate_delta_edges_against_base() {
         let graph = CsrGraph::from_edges(&[(0, 1), (0, 2)]);
-        graph
-            .delta()
-            .insert(NodeId::new(0), NodeId::new(2), Default::default());
-        graph
-            .delta()
-            .insert(NodeId::new(0), NodeId::new(3), Default::default());
+        graph.delta().insert(
+            NodeId::new(0),
+            NodeId::new(2),
+            crate::types::EdgeData::default(),
+        );
+        graph.delta().insert(
+            NodeId::new(0),
+            NodeId::new(3),
+            crate::types::EdgeData::default(),
+        );
 
         let neighbors: Vec<_> = graph.neighbors(NodeId::new(0)).collect();
 
@@ -315,9 +328,11 @@ mod tests {
     #[test]
     fn out_degree_does_not_double_count_delta_duplicates() {
         let graph = CsrGraph::from_edges(&[(0, 1)]);
-        graph
-            .delta()
-            .insert(NodeId::new(0), NodeId::new(1), Default::default());
+        graph.delta().insert(
+            NodeId::new(0),
+            NodeId::new(1),
+            crate::types::EdgeData::default(),
+        );
 
         assert_eq!(graph.out_degree(NodeId::new(0)), 1);
     }

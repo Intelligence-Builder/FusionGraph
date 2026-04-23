@@ -165,18 +165,23 @@ mod proptest_tests {
     }
 
     fn arb_node_def() -> impl Strategy<Value = crate::schema::NodeDefinition> {
-        (arb_identifier(), arb_identifier(), arb_identifier())
-            .prop_map(|(label, source, id_column)| crate::schema::NodeDefinition {
+        (arb_identifier(), arb_identifier(), arb_identifier()).prop_map(
+            |(label, source, id_column)| crate::schema::NodeDefinition {
                 label,
                 source,
-                id_column,
+                id_column: crate::schema::IdColumn::Single(id_column),
+                id_transform: crate::schema::IdTransform::Passthrough,
                 properties: vec![],
                 filter: None,
-            })
+            },
+        )
     }
 
     fn arb_ontology() -> impl Strategy<Value = crate::schema::Ontology> {
-        (arb_identifier(), prop::collection::vec(arb_node_def(), 0..5))
+        (
+            arb_identifier(),
+            prop::collection::vec(arb_node_def(), 0..5),
+        )
             .prop_map(|(name, nodes)| crate::schema::Ontology {
                 ontology: crate::schema::OntologyMeta {
                     name,
