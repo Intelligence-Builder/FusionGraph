@@ -665,8 +665,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_csr_builder_verify_graph_structure() {
-        // Verify the built CSR graph has correct neighbor relationships
+    async fn test_csr_builder_reports_graph_metadata() {
+        // Verify the built CSR graph reports the expected node and shard metadata
         let batch = create_edge_batch(vec![0, 0, 1, 2], vec![1, 2, 2, 3]);
         let schema = batch.schema();
 
