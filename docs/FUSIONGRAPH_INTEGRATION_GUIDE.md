@@ -1,9 +1,9 @@
 # FusionGraph Documentation Integration Guide
 
 **Repository:** https://github.com/Intelligence-Builder/FusionGraph  
-**Local Path:** /Users/robertstanley/Desktop/FusionGraph
+**Local Path:** `$REPO_ROOT/FusionGraph`
 
-This guide shows how to integrate the generated documentation into your FusionGraph repository.
+This guide shows how to integrate generated documentation into your local FusionGraph repository checkout.
 
 ---
 
@@ -62,22 +62,23 @@ FusionGraph/
 
 ### 1. Copy Documentation Files
 
-From `/mnt/user-data/outputs/`, copy these files to your repository:
+Set `GENERATED_DOCS_DIR` to the directory containing the generated documentation files, then copy them into your repository:
 
 ```bash
-cd /Users/robertstanley/Desktop/FusionGraph
+cd "$REPO_ROOT/FusionGraph"
+GENERATED_DOCS_DIR=/path/to/generated-docs
 
 # Main repository files
-cp /mnt/user-data/outputs/FUSIONGRAPH_README_EXPANDED.md README.md
-cp /mnt/user-data/outputs/FUSIONGRAPH_CONTRIBUTING.md CONTRIBUTING.md
+cp "$GENERATED_DOCS_DIR/FUSIONGRAPH_README_EXPANDED.md" README.md
+cp "$GENERATED_DOCS_DIR/FUSIONGRAPH_CONTRIBUTING.md" CONTRIBUTING.md
 
 # Architecture documentation
 mkdir -p docs
-cp /mnt/user-data/outputs/FUSIONGRAPH_ARCHITECTURE.md docs/ARCHITECTURE.md
+cp "$GENERATED_DOCS_DIR/FUSIONGRAPH_ARCHITECTURE.md" docs/ARCHITECTURE.md
 
 # Blog/announcement materials
 mkdir -p blog
-cp /mnt/user-data/outputs/FUSIONGRAPH_BLOG_POST.md blog/launch-announcement.md
+cp "$GENERATED_DOCS_DIR/FUSIONGRAPH_BLOG_POST.md" blog/launch-announcement.md
 
 # Keep Apache proposal for mailing list (not in repo initially)
 # You'll use FUSIONGRAPH_APACHE_PROPOSAL.md when emailing dev@arrow.apache.org
@@ -130,10 +131,10 @@ keywords = ["graph", "datafusion", "arrow", "zero-copy", "simd"]
 categories = ["database", "algorithms"]
 
 [dependencies]
-datafusion = "35"
-arrow = "51"
-arrow-array = "51"
-arrow-schema = "51"
+datafusion = "45"
+arrow = "54"
+arrow-array = "54"
+arrow-schema = "54"
 dashmap = "5"
 roaring = "0.10"
 

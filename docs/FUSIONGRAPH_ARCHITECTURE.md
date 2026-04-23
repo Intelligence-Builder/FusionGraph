@@ -768,4 +768,4 @@ FusionGraph demonstrates that high-performance graph processing is achievable di
 
 The LSM-Graph pattern enables real-time graph updates without sacrificing read performance, and SIMD acceleration on micro-sharded CSR topology achieves single-digit microsecond traversal latency.
 
-For questions or contributions, see [CONTRIBUTING.md](CONTRIBUTING.md).
+For questions or contributions, see [CONTRIBUTING.md](../CONTRIBUTING.md).

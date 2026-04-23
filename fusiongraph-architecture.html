@@ -138,15 +138,38 @@
             cursor: pointer;
         }
         
-        .layer-card:hover {
+        .layer-card:hover,
+        .layer-card:focus-visible {
             border-color: var(--bright-blue);
             box-shadow: 0 6px 20px rgba(10, 144, 205, 0.15);
             transform: translateY(-2px);
+            outline: none;
         }
         
         .layer-card.active {
             border-color: var(--bright-blue);
             background: rgba(10, 144, 205, 0.05);
+        }
+
+        .layer-reset {
+            display: block;
+            margin: 24px auto 0;
+            padding: 12px 20px;
+            border: 1px solid var(--bright-blue);
+            border-radius: 8px;
+            background: white;
+            color: var(--bright-blue);
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .layer-reset:hover,
+        .layer-reset:focus-visible {
+            background: rgba(10, 144, 205, 0.08);
+            box-shadow: 0 4px 14px rgba(10, 144, 205, 0.14);
+            outline: none;
         }
         
         .layer-number {
@@ -576,10 +599,10 @@
             <!-- Layer Details -->
             <section class="section">
                 <h2 class="section-title">Layer Details</h2>
-                <p class="section-subtitle">Click on each layer to learn more about its functionality</p>
+                <p class="section-subtitle">Click or press Enter on each layer to learn more about its functionality</p>
                 
                 <div class="layers-grid">
-                    <div class="layer-card" data-layer="storage">
+                    <div class="layer-card" data-layer="storage" role="button" tabindex="0" aria-pressed="false">
                         <div class="layer-number">1</div>
                         <h3>Storage Layer</h3>
                         <h4>Catalog Trait</h4>
@@ -592,7 +615,7 @@
                         </ul>
                     </div>
                     
-                    <div class="layer-card" data-layer="projection">
+                    <div class="layer-card" data-layer="projection" role="button" tabindex="0" aria-pressed="false">
                         <div class="layer-number">2</div>
                         <h3>Projection Layer</h3>
                         <h4>Zero-Copy Bridge</h4>
@@ -605,7 +628,7 @@
                         </ul>
                     </div>
                     
-                    <div class="layer-card" data-layer="kernel">
+                    <div class="layer-card" data-layer="kernel" role="button" tabindex="0" aria-pressed="false">
                         <div class="layer-number">3</div>
                         <h3>Kernel Layer</h3>
                         <h4>CSR Core</h4>
@@ -618,7 +641,7 @@
                         </ul>
                     </div>
                     
-                    <div class="layer-card" data-layer="intelligence">
+                    <div class="layer-card" data-layer="intelligence" role="button" tabindex="0" aria-pressed="false">
                         <div class="layer-number">4</div>
                         <h3>Intelligence Layer</h3>
                         <h4>ReflexArc</h4>
@@ -631,6 +654,7 @@
                         </ul>
                     </div>
                 </div>
+                <button type="button" class="layer-reset">Reset layer highlighting</button>
             </section>
             
             <!-- Technical Features -->
@@ -823,34 +847,54 @@
         // Interactive layer highlighting
         const layerCards = document.querySelectorAll('.layer-card');
         const svgLayers = document.querySelectorAll('svg .layer');
+        const resetButton = document.querySelector('.layer-reset');
         
+        function selectLayer(card) {
+            const layerName = card.getAttribute('data-layer');
+
+            // Remove active state from all cards
+            layerCards.forEach(c => {
+                c.classList.remove('active');
+                c.setAttribute('aria-pressed', 'false');
+            });
+
+            // Add active state to selected card
+            card.classList.add('active');
+            card.setAttribute('aria-pressed', 'true');
+
+            // Highlight corresponding SVG layer
+            svgLayers.forEach(layer => {
+                const layerDataAttr = layer.getAttribute('data-layer');
+                if (layerDataAttr === layerName) {
+                    layer.style.opacity = '1';
+                } else {
+                    layer.style.opacity = '0.3';
+                }
+            });
+        }
+
+        function resetLayers() {
+            layerCards.forEach(c => {
+                c.classList.remove('active');
+                c.setAttribute('aria-pressed', 'false');
+            });
+            svgLayers.forEach(layer => layer.style.opacity = '1');
+        }
+
         layerCards.forEach(card => {
             card.addEventListener('click', function() {
-                const layerName = this.getAttribute('data-layer');
-                
-                // Remove active class from all cards
-                layerCards.forEach(c => c.classList.remove('active'));
-                
-                // Add active class to clicked card
-                this.classList.add('active');
-                
-                // Highlight corresponding SVG layer
-                svgLayers.forEach(layer => {
-                    const layerDataAttr = layer.getAttribute('data-layer');
-                    if (layerDataAttr === layerName) {
-                        layer.style.opacity = '1';
-                    } else {
-                        layer.style.opacity = '0.3';
-                    }
-                });
+                selectLayer(this);
+            });
+
+            card.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectLayer(this);
+                }
             });
         });
-        
-        // Reset on double-click
-        document.addEventListener('dblclick', function() {
-            layerCards.forEach(c => c.classList.remove('active'));
-            svgLayers.forEach(layer => layer.style.opacity = '1');
-        });
+
+        resetButton?.addEventListener('click', resetLayers);
     </script>
 </body>
 </html>

@@ -775,20 +775,22 @@ pub enum GraphError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Circuit breaker open, failing fast")]
+    #[error("FG-SYS-E001: Circuit breaker open, failing fast")]
     CircuitOpen,
 
-    #[error("Internal error: {0}")]
-    Internal(String),
+    #[error("FG-SYS-E002: Internal error: {message}")]
+    Internal { message: String },
 }
 ```
 
 ### 8.1 Circuit Breaker
 
 Thread-safe circuit breaker for protecting against external dependency failures.
+Implemented in `fusiongraph_core::circuit_breaker`.
 
 ```rust
 use std::time::Duration;
+use fusiongraph_core::error::GraphError;
 
 /// Circuit breaker states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -848,19 +850,26 @@ impl CircuitBreaker {
 **Usage:**
 
 ```rust
-let cb = CircuitBreaker::with_defaults();
+async fn fetch_table_with_circuit_breaker(
+    iceberg_client: &IcebergClient,
+    name: &str,
+) -> Result<Table, GraphError> {
+    let cb = CircuitBreaker::with_defaults();
 
-// Guard external calls
-cb.check()?;  // Fails fast if open
+    // Guard external calls
+    cb.check()?;  // Fails fast if open
 
-match iceberg_client.fetch_table(name).await {
-    Ok(table) => {
-        cb.record_success();
-        Ok(table)
-    }
-    Err(e) => {
-        cb.record_failure();
-        Err(e)
+    match iceberg_client.fetch_table(name).await {
+        Ok(table) => {
+            cb.record_success();
+            Ok(table)
+        }
+        Err(e) => {
+            cb.record_failure();
+            Err(GraphError::Internal {
+                message: e.to_string(),
+            })
+        }
     }
 }
 ```

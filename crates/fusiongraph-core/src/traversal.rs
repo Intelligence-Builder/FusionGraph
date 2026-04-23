@@ -7,16 +7,22 @@
 //!
 //! ## SIMD Acceleration
 //!
-//! The `simd` module provides platform-specific SIMD backends for accelerated
-//! neighbor filtering. Use `simd::select_backend()` for runtime detection.
+//! The [`simd`] module provides cross-platform SIMD backends for accelerated
+//! neighbor evaluation. Use [`simd::select_backend`] for automatic runtime
+//! detection of the best available backend.
+
+#![allow(clippy::missing_const_for_fn, clippy::must_use_candidate)]
 
 mod bfs;
 pub mod bitset;
 pub mod simd;
 
-pub use bfs::{bfs, bfs_multi, BfsResult};
+pub use bfs::{bfs, BfsResult};
 pub use bitset::AtomicBitset;
-pub use simd::{detect_simd_support, select_backend, ScalarBackend, SimdBackend};
+pub use simd::{
+    backend_name, dense_index_to_node_id, node_id_to_dense_index, select_backend, ScalarBackend,
+    SimdBackend,
+};
 
 use crate::types::NodeId;
 

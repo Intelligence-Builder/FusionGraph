@@ -292,7 +292,7 @@ FusionGraph is open source and welcomes contributions from the Apache Arrow/Data
 ```bash
 # Clone the repository
 git clone https://github.com/Intelligence-Builder/FusionGraph.git
-cd fusiongraph
+cd FusionGraph
 
 # Build the project
 cargo build --release
@@ -312,7 +312,7 @@ cargo bench
 - **Benchmarking:** Performance comparison vs graph databases
 - **Documentation:** Architecture guides, tutorials, examples
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed contribution guidelines.
 
 ---
 
@@ -329,10 +329,10 @@ FusionGraph is under active development. The core CSR kernel and LSM-Graph archi
 ## Architecture Documentation
 
 For detailed technical architecture, see:
-- [Architecture Overview](docs/architecture.md) — System design and component interaction
-- [CSR Kernel Design](docs/csr-kernel.md) — Micro-sharding, SIMD optimization, memory layout
-- [LSM-Graph Pattern](docs/lsm-graph.md) — Dual-layer architecture, dirty mask, epoch-based reclamation
-- [DataFusion Integration](docs/datafusion-integration.md) — Physical operators, Substrait plans, query flow
+- [Architecture Overview](FUSIONGRAPH_ARCHITECTURE.md) — System design and component interaction
+- [API Reference](FusionGraph_API_Reference.md) — Public API surface, CSR kernel types, traversal, and error handling
+- [Technical Blueprint](FusionGraph_Technical%20Blueprint.md) — LSM-Graph pattern, micro-sharding, and SIMD memory layout
+- [DataFusion Execution RFC](FusionGraph_DataFusion%20Graph%20Execution%20RFC.md) — Physical operators, Substrait plans, and query flow
 
 ---
 
@@ -347,7 +347,7 @@ For detailed technical architecture, see:
 
 ## License
 
-FusionGraph is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+FusionGraph is licensed under the Apache License 2.0. See [LICENSE](../LICENSE) for details.
 
 This project aims to become part of the Apache DataFusion ecosystem and follows Apache Foundation governance principles.
 

@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A thread-safe bitset optimized for graph traversal visited tracking.
 ///
-/// Uses atomic operations for concurrent access and is cache-line aligned
-/// for SIMD-friendly memory access patterns.
+/// Uses atomic operations over contiguous word storage for concurrent access
+/// and SIMD-friendly batch scans. The backing allocation is not guaranteed to
+/// be cache-line aligned.
 #[derive(Debug)]
 pub struct AtomicBitset {
     /// Bit storage (64 bits per element).
@@ -18,7 +19,7 @@ impl AtomicBitset {
     /// Creates a new bitset with capacity for `n` bits, all initially unset.
     #[must_use]
     pub fn new(n: usize) -> Self {
-        let num_words = (n + 63) / 64;
+        let num_words = n.div_ceil(64);
         let bits: Vec<AtomicU64> = (0..num_words).map(|_| AtomicU64::new(0)).collect();
         Self {
             bits: bits.into_boxed_slice(),

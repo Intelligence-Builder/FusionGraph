@@ -6,7 +6,7 @@ Thank you for your interest in contributing to FusionGraph! This project aims to
 
 ## Code of Conduct
 
-FusionGraph follows the [Apache Code of Conduct](https://www.apache.org/foundation/policies/conduct.html). By participating, you agree to uphold this code. Please report unacceptable behavior to [project maintainers].
+FusionGraph follows the [Apache Code of Conduct](https://www.apache.org/foundation/policies/conduct.html). By participating, you agree to uphold this code. Please report unacceptable behavior via [GitHub Discussions](https://github.com/Intelligence-Builder/FusionGraph/discussions).
 
 ---
 
@@ -76,7 +76,7 @@ Documentation improvements are highly valued! This includes:
 ### Prerequisites
 
 - **Rust 1.75+** (install via [rustup](https://rustup.rs/))
-- **Apache DataFusion 35+** (included as dependency)
+- **Apache DataFusion 45+** (included as dependency)
 - **AVX-512 capable CPU** (for SIMD benchmarks, optional)
 
 ### Clone and Build
@@ -84,7 +84,7 @@ Documentation improvements are highly valued! This includes:
 ```bash
 # Clone your fork
 git clone https://github.com/Intelligence-Builder/FusionGraph.git
-cd fusiongraph
+cd FusionGraph
 
 # Build the project
 cargo build --release
