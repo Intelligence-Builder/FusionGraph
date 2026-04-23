@@ -1,4 +1,4 @@
-//! FusionGraph Core - High-performance graph kernel
+//! `FusionGraph` Core - High-performance graph kernel
 //!
 //! This crate provides the core graph data structures and algorithms:
 //! - CSR (Compressed Sparse Row) storage with micro-sharding
@@ -8,6 +8,11 @@
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
+#![allow(
+    clippy::missing_const_for_fn,
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use
+)]
 
 pub mod csr;
 pub mod delta;

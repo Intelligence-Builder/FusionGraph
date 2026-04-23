@@ -51,7 +51,7 @@ impl SimdBackend for ScalarBackend {
         neighbors
             .iter()
             .filter(|&&n| {
-                let word_idx = (n / 64) as usize;
+                let word_idx = usize::try_from(n / 64).expect("u32 node id fits usize");
                 let bit_idx = n % 64;
                 word_idx < visited.len() && (visited[word_idx] & (1u64 << bit_idx)) == 0
             })
@@ -61,7 +61,7 @@ impl SimdBackend for ScalarBackend {
 
     fn set_visited_batch(&self, nodes: &[u32], visited: &mut [u64]) {
         for &n in nodes {
-            let word_idx = (n / 64) as usize;
+            let word_idx = usize::try_from(n / 64).expect("u32 node id fits usize");
             let bit_idx = n % 64;
             if word_idx < visited.len() {
                 visited[word_idx] |= 1u64 << bit_idx;
@@ -92,7 +92,7 @@ impl SimdBackend for Avx2Backend {
 
     fn set_visited_batch(&self, nodes: &[u32], visited: &mut [u64]) {
         // TODO: Implement AVX2 intrinsics for batch bit-setting
-        ScalarBackend.set_visited_batch(nodes, visited)
+        ScalarBackend.set_visited_batch(nodes, visited);
     }
 }
 
@@ -118,7 +118,7 @@ impl SimdBackend for Avx512Backend {
 
     fn set_visited_batch(&self, nodes: &[u32], visited: &mut [u64]) {
         // TODO: Implement AVX-512 intrinsics for batch bit-setting
-        ScalarBackend.set_visited_batch(nodes, visited)
+        ScalarBackend.set_visited_batch(nodes, visited);
     }
 }
 
@@ -144,7 +144,7 @@ impl SimdBackend for NeonBackend {
 
     fn set_visited_batch(&self, nodes: &[u32], visited: &mut [u64]) {
         // TODO: Implement Neon intrinsics for batch bit-setting
-        ScalarBackend.set_visited_batch(nodes, visited)
+        ScalarBackend.set_visited_batch(nodes, visited);
     }
 }
 
@@ -155,6 +155,7 @@ impl SimdBackend for NeonBackend {
 /// - aarch64: Neon (always available)
 /// - other: Scalar
 #[cfg(target_arch = "x86_64")]
+#[must_use]
 pub fn select_backend() -> Box<dyn SimdBackend> {
     if is_x86_feature_detected!("avx512f") {
         return Box::new(Avx512Backend);
@@ -167,18 +168,21 @@ pub fn select_backend() -> Box<dyn SimdBackend> {
 
 /// Selects the best available SIMD backend for the current platform.
 #[cfg(target_arch = "aarch64")]
+#[must_use]
 pub fn select_backend() -> Box<dyn SimdBackend> {
     Box::new(NeonBackend)
 }
 
 /// Selects the best available SIMD backend for the current platform.
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[must_use]
 pub fn select_backend() -> Box<dyn SimdBackend> {
     Box::new(ScalarBackend)
 }
 
 /// Returns the name of the selected SIMD backend without allocating.
 #[cfg(target_arch = "x86_64")]
+#[must_use]
 pub fn backend_name() -> &'static str {
     if is_x86_feature_detected!("avx512f") {
         return "avx512";
@@ -191,13 +195,15 @@ pub fn backend_name() -> &'static str {
 
 /// Returns the name of the selected SIMD backend without allocating.
 #[cfg(target_arch = "aarch64")]
-pub fn backend_name() -> &'static str {
+#[must_use]
+pub const fn backend_name() -> &'static str {
     "neon"
 }
 
 /// Returns the name of the selected SIMD backend without allocating.
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-pub fn backend_name() -> &'static str {
+#[must_use]
+pub const fn backend_name() -> &'static str {
     "scalar"
 }
 
@@ -256,6 +262,11 @@ mod tests {
         let backend = select_backend();
         let actual = backend.filter_unvisited(&neighbors, &visited);
 
-        assert_eq!(actual, expected, "Backend {} differs from scalar", backend.name());
+        assert_eq!(
+            actual,
+            expected,
+            "Backend {} differs from scalar",
+            backend.name()
+        );
     }
 }
