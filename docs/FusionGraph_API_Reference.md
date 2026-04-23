@@ -850,19 +850,26 @@ impl CircuitBreaker {
 **Usage:**
 
 ```rust
-let cb = CircuitBreaker::with_defaults();
+async fn fetch_table_with_circuit_breaker(
+    iceberg_client: &IcebergClient,
+    name: &str,
+) -> Result<Table, GraphError> {
+    let cb = CircuitBreaker::with_defaults();
 
-// Guard external calls
-cb.check()?;  // Fails fast if open
+    // Guard external calls
+    cb.check()?;  // Fails fast if open
 
-match iceberg_client.fetch_table(name).await {
-    Ok(table) => {
-        cb.record_success();
-        Ok(table)
-    }
-    Err(e) => {
-        cb.record_failure();
-        Err(e)
+    match iceberg_client.fetch_table(name).await {
+        Ok(table) => {
+            cb.record_success();
+            Ok(table)
+        }
+        Err(e) => {
+            cb.record_failure();
+            Err(GraphError::Internal {
+                message: e.to_string(),
+            })
+        }
     }
 }
 ```
