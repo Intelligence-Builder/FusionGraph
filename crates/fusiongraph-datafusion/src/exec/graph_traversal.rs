@@ -330,9 +330,8 @@ mod tests {
         let ctx = SessionContext::new();
         let task_ctx = ctx.task_ctx();
 
-        let err = match exec.execute(0, task_ctx) {
-            Ok(_) => panic!("DFS traversal should not be accepted before implementation"),
-            Err(err) => err,
+        let Err(err) = exec.execute(0, task_ctx) else {
+            panic!("DFS traversal should not be accepted before implementation");
         };
         assert!(err.to_string().contains("only supports BFS traversal"));
     }
@@ -352,9 +351,8 @@ mod tests {
         let ctx = SessionContext::new();
         let task_ctx = ctx.task_ctx();
 
-        let err = match exec.execute(0, task_ctx) {
-            Ok(_) => panic!("incoming traversal should not be accepted before implementation"),
-            Err(err) => err,
+        let Err(err) = exec.execute(0, task_ctx) else {
+            panic!("incoming traversal should not be accepted before implementation");
         };
         assert!(err.to_string().contains("only supports outgoing traversal"));
     }
@@ -420,7 +418,7 @@ mod tests {
 
         let exec = GraphTraversalExec::new(graph, spec);
         // Verify DisplayAs is implemented - use Debug format for testing
-        let debug_str = format!("{:?}", exec);
+        let debug_str = format!("{exec:?}");
         assert!(debug_str.contains("GraphTraversalExec"));
     }
 }

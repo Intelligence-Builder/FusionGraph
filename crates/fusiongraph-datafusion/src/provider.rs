@@ -256,10 +256,10 @@ properties = ["since"]
         ontology
     }
 
-    fn assert_id_fields(schema: &Schema, expected: DataType) {
+    fn assert_id_fields(schema: &Schema, expected: &DataType) {
         for field_name in ["node_id", "source_id", "target_id"] {
             if let Ok(field) = schema.field_with_name(field_name) {
-                assert_eq!(field.data_type(), &expected);
+                assert_eq!(field.data_type(), expected);
             }
         }
     }
@@ -325,8 +325,8 @@ properties = ["since"]
             .edge_schema("FOLLOWS")
             .expect("FOLLOWS schema should exist");
 
-        assert_id_fields(&node_schema, DataType::UInt64);
-        assert_id_fields(&edge_schema, DataType::UInt64);
+        assert_id_fields(&node_schema, &DataType::UInt64);
+        assert_id_fields(&edge_schema, &DataType::UInt64);
     }
 
     #[test]
@@ -341,8 +341,8 @@ properties = ["since"]
             .edge_schema("FOLLOWS")
             .expect("FOLLOWS schema should exist");
 
-        assert_id_fields(&node_schema, DataType::FixedSizeBinary(16));
-        assert_id_fields(&edge_schema, DataType::FixedSizeBinary(16));
+        assert_id_fields(&node_schema, &DataType::FixedSizeBinary(16));
+        assert_id_fields(&edge_schema, &DataType::FixedSizeBinary(16));
     }
 
     #[test]
@@ -398,9 +398,8 @@ properties = ["since"]
         let ctx = datafusion::prelude::SessionContext::new();
         let state = ctx.state();
 
-        let err = match provider.create_traversal_plan(&state, spec, &[]).await {
-            Ok(_) => panic!("traversal plan creation should be gated until execution exists"),
-            Err(err) => err,
+        let Err(err) = provider.create_traversal_plan(&state, spec, &[]).await else {
+            panic!("traversal plan creation should be gated until execution exists");
         };
 
         assert!(matches!(err, DataFusionError::NotImplemented(_)));
