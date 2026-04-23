@@ -154,3 +154,82 @@ to_column = "group_id"
         assert_eq!(ontology.node_labels(), vec!["Node"]);
     }
 }
+
+#[cfg(test)]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_identifier() -> impl Strategy<Value = String> {
+        "[a-zA-Z][a-zA-Z0-9_]{0,20}".prop_map(|s| s)
+    }
+
+    fn arb_node_def() -> impl Strategy<Value = crate::schema::NodeDefinition> {
+        (arb_identifier(), arb_identifier(), arb_identifier()).prop_map(
+            |(label, source, id_column)| crate::schema::NodeDefinition {
+                label,
+                source,
+                id_column: crate::schema::IdColumn::Single(id_column),
+                id_transform: crate::schema::IdTransform::Passthrough,
+                properties: vec![],
+                filter: None,
+            },
+        )
+    }
+
+    fn arb_ontology() -> impl Strategy<Value = crate::schema::Ontology> {
+        (
+            arb_identifier(),
+            prop::collection::vec(arb_node_def(), 0..5),
+        )
+            .prop_map(|(name, nodes)| crate::schema::Ontology {
+                ontology: crate::schema::OntologyMeta {
+                    name,
+                    version: "1.0".to_string(),
+                    description: String::new(),
+                },
+                settings: Default::default(),
+                nodes,
+                edges: vec![],
+                properties: vec![],
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn toml_roundtrip(ontology in arb_ontology()) {
+            let toml_str = toml::to_string(&ontology).unwrap();
+            let parsed = parse_toml(&toml_str).unwrap();
+            prop_assert_eq!(ontology.name(), parsed.name());
+            prop_assert_eq!(ontology.node_labels().len(), parsed.node_labels().len());
+        }
+
+        #[test]
+        fn json_roundtrip(ontology in arb_ontology()) {
+            let json_str = serde_json::to_string(&ontology).unwrap();
+            let parsed = parse_json(&json_str).unwrap();
+            prop_assert_eq!(ontology.name(), parsed.name());
+            prop_assert_eq!(ontology.node_labels().len(), parsed.node_labels().len());
+        }
+
+        #[test]
+        fn toml_json_equivalence(ontology in arb_ontology()) {
+            let toml_str = toml::to_string(&ontology).unwrap();
+            let json_str = serde_json::to_string(&ontology).unwrap();
+            let from_toml = parse_toml(&toml_str).unwrap();
+            let from_json = parse_json(&json_str).unwrap();
+            prop_assert_eq!(from_toml.name(), from_json.name());
+            prop_assert_eq!(from_toml.node_labels(), from_json.node_labels());
+        }
+
+        #[test]
+        fn invalid_toml_does_not_panic(s in ".{0,256}") {
+            let _ = parse_toml(&s);
+        }
+
+        #[test]
+        fn invalid_json_does_not_panic(s in ".{0,256}") {
+            let _ = parse_json(&s);
+        }
+    }
+}

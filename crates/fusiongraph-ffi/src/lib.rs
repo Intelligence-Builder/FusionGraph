@@ -48,7 +48,10 @@ pub type Result<T> = std::result::Result<T, FfiError>;
 ///
 /// The caller must ensure that:
 /// - `array` and `schema` are valid Arrow C Data Interface structs
-/// - Ownership is transferred to this function (structs will be consumed)
+/// - Ownership of `array` is transferred to this function and consumed
+/// - `schema` remains valid for the duration of this call
+/// - The caller retains ownership of `schema` and remains responsible for
+///   releasing it according to the Arrow C Data Interface contract
 pub unsafe fn import_record_batch(
     array: FFI_ArrowArray,
     schema: &FFI_ArrowSchema,
