@@ -1,10 +1,11 @@
 //! `GraphTraversalExec` - Physical operator for graph traversals.
 
 use std::any::Any;
+use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 
-use arrow::buffer::OffsetBuffer;
+use arrow::buffer::{NullBuffer, OffsetBuffer};
 use arrow_array::{ArrayRef, ListArray, RecordBatch, UInt32Array, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::execution::TaskContext;
@@ -17,7 +18,7 @@ use datafusion::physical_plan::{
 };
 use futures::stream;
 
-use fusiongraph_core::traversal::{bfs, TraversalSpec};
+use fusiongraph_core::traversal::{TraversalAlgorithm, TraversalDirection, TraversalSpec};
 use fusiongraph_core::CsrGraph;
 
 /// Physical operator for executing graph traversals.
@@ -77,6 +78,71 @@ impl GraphTraversalExec {
     pub const fn graph(&self) -> &Arc<CsrGraph> {
         &self.graph
     }
+
+    fn validate_spec(&self) -> datafusion::error::Result<()> {
+        if self.spec.algorithm != TraversalAlgorithm::Bfs {
+            return Err(datafusion::error::DataFusionError::NotImplemented(format!(
+                "GraphTraversalExec only supports BFS traversal, got {:?}",
+                self.spec.algorithm
+            )));
+        }
+
+        if self.spec.direction != TraversalDirection::Outgoing {
+            return Err(datafusion::error::DataFusionError::NotImplemented(format!(
+                "GraphTraversalExec only supports outgoing traversal, got {:?}",
+                self.spec.direction
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn collect_bfs_rows(&self, max_nodes: usize) -> (Vec<u64>, Vec<u32>) {
+        if max_nodes == 0 {
+            return (Vec::new(), Vec::new());
+        }
+
+        let mut visited_set: HashSet<_> = HashSet::new();
+        let mut queue: VecDeque<_> = VecDeque::new();
+
+        for &start in &self.spec.start {
+            if visited_set.len() >= max_nodes {
+                break;
+            }
+
+            if self.graph.contains(start) && visited_set.insert(start) {
+                queue.push_back((start, 0_u32));
+            }
+        }
+
+        let mut node_ids = Vec::with_capacity(visited_set.len().min(max_nodes));
+        let mut depths = Vec::with_capacity(visited_set.len().min(max_nodes));
+
+        while let Some((node, depth)) = queue.pop_front() {
+            if node_ids.len() >= max_nodes {
+                break;
+            }
+
+            node_ids.push(node.as_u64());
+            depths.push(depth);
+
+            if depth >= self.spec.max_depth {
+                continue;
+            }
+
+            for neighbor in self.graph.neighbors(node) {
+                if visited_set.len() >= max_nodes {
+                    break;
+                }
+
+                if visited_set.insert(neighbor) {
+                    queue.push_back((neighbor, depth + 1));
+                }
+            }
+        }
+
+        (node_ids, depths)
+    }
 }
 
 impl DisplayAs for GraphTraversalExec {
@@ -134,60 +200,25 @@ impl ExecutionPlan for GraphTraversalExec {
             )));
         }
 
-        // Execute a single multi-source BFS so each reachable node is emitted once
-        // at its minimum depth from the closest start node.
-        let result = fusiongraph_core::traversal::bfs::bfs_multi(
-            &self.graph,
-            &self.spec.start,
-            self.spec.max_depth,
-        );
+        self.validate_spec()?;
 
-        let mut all_node_ids: Vec<u64> = Vec::with_capacity(result.visited.len());
-        let mut all_depths: Vec<u32> = Vec::with_capacity(result.visited.len());
-        let mut all_paths: Vec<Vec<u64>> = Vec::with_capacity(result.visited.len());
-
-        for (idx, &node_id) in result.visited.iter().enumerate() {
-            all_node_ids.push(node_id.as_u64());
-            all_depths.push(result.depths[idx]);
-            // Preserve the existing simplified path behavior without encoding
-            // per-start concatenation semantics in the output schema.
-            all_paths.push(vec![node_id.as_u64()]);
-        }
+        let max_nodes = self.spec.max_nodes.unwrap_or(usize::MAX);
+        let (all_node_ids, all_depths) = self.collect_bfs_rows(max_nodes);
+        let row_count = all_node_ids.len();
 
         // Build Arrow arrays
         let node_id_array: ArrayRef = Arc::new(UInt64Array::from(all_node_ids));
         let depth_array: ArrayRef = Arc::new(UInt32Array::from(all_depths));
 
-        // Build ListArray for paths
-        let path_values: Vec<u64> = all_paths.iter().flatten().copied().collect();
-        let offsets: Vec<i32> = all_paths
-            .iter()
-            .try_fold(vec![0_i32], |mut offsets, path| {
-                let path_len = i32::try_from(path.len()).map_err(|_| {
-                    datafusion::error::DataFusionError::Execution(
-                        "traversal path length exceeds Arrow list offset capacity".to_string(),
-                    )
-                })?;
-                let next = offsets
-                    .last()
-                    .copied()
-                    .unwrap_or_default()
-                    .checked_add(path_len)
-                    .ok_or_else(|| {
-                        datafusion::error::DataFusionError::Execution(
-                            "traversal path offsets exceed Arrow list offset capacity".to_string(),
-                        )
-                    })?;
-                offsets.push(next);
-                Ok::<_, datafusion::error::DataFusionError>(offsets)
-            })?;
-
-        let values_array = UInt64Array::from(path_values);
+        // Parent tracking is not implemented yet, so expose the nullable path
+        // column as NULL instead of returning misleading synthetic paths.
+        let offsets = vec![0_i32; row_count + 1];
+        let values_array = UInt64Array::from(Vec::<u64>::new());
         let path_array: ArrayRef = Arc::new(ListArray::new(
             Arc::new(Field::new("item", DataType::UInt64, false)),
             OffsetBuffer::new(offsets.into()),
             Arc::new(values_array),
-            None,
+            Some((0..row_count).map(|_| false).collect::<NullBuffer>()),
         ));
 
         let batch =
@@ -282,6 +313,98 @@ mod tests {
         for depth in depths.iter().flatten() {
             assert!(depth <= 1);
         }
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_non_bfs_algorithm() {
+        let graph = build_test_graph();
+        let spec = TraversalSpec {
+            start: vec![NodeId::new(0)],
+            max_depth: 2,
+            max_nodes: None,
+            algorithm: TraversalAlgorithm::Dfs,
+            direction: TraversalDirection::Outgoing,
+        };
+
+        let exec = GraphTraversalExec::new(graph, spec);
+        let ctx = SessionContext::new();
+        let task_ctx = ctx.task_ctx();
+
+        let err = match exec.execute(0, task_ctx) {
+            Ok(_) => panic!("DFS traversal should not be accepted before implementation"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("only supports BFS traversal"));
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_non_outgoing_direction() {
+        let graph = build_test_graph();
+        let spec = TraversalSpec {
+            start: vec![NodeId::new(0)],
+            max_depth: 2,
+            max_nodes: None,
+            algorithm: TraversalAlgorithm::Bfs,
+            direction: TraversalDirection::Incoming,
+        };
+
+        let exec = GraphTraversalExec::new(graph, spec);
+        let ctx = SessionContext::new();
+        let task_ctx = ctx.task_ctx();
+
+        let err = match exec.execute(0, task_ctx) {
+            Ok(_) => panic!("incoming traversal should not be accepted before implementation"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("only supports outgoing traversal"));
+    }
+
+    #[tokio::test]
+    async fn execute_enforces_max_nodes() {
+        let graph = build_test_graph();
+        let spec = TraversalSpec {
+            start: vec![NodeId::new(0)],
+            max_depth: 3,
+            max_nodes: Some(2),
+            algorithm: TraversalAlgorithm::Bfs,
+            direction: TraversalDirection::Outgoing,
+        };
+
+        let exec = GraphTraversalExec::new(graph, spec);
+        let ctx = SessionContext::new();
+        let task_ctx = ctx.task_ctx();
+
+        let mut stream = exec.execute(0, task_ctx).unwrap();
+        let batch = stream.next().await.unwrap().unwrap();
+
+        assert_eq!(batch.num_rows(), 2);
+    }
+
+    #[tokio::test]
+    async fn execute_returns_null_paths_until_parent_tracking_exists() {
+        let graph = build_test_graph();
+        let spec = TraversalSpec {
+            start: vec![NodeId::new(0)],
+            max_depth: 2,
+            max_nodes: None,
+            algorithm: TraversalAlgorithm::Bfs,
+            direction: TraversalDirection::Outgoing,
+        };
+
+        let exec = GraphTraversalExec::new(graph, spec);
+        let ctx = SessionContext::new();
+        let task_ctx = ctx.task_ctx();
+
+        let mut stream = exec.execute(0, task_ctx).unwrap();
+        let batch = stream.next().await.unwrap().unwrap();
+        let paths = batch
+            .column(2)
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+
+        assert_eq!(paths.len(), batch.num_rows());
+        assert_eq!(paths.null_count(), batch.num_rows());
     }
 
     #[test]

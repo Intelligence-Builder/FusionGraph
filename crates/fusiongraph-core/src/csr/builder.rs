@@ -252,10 +252,16 @@ impl CsrBuilder {
             let shard_node_count = end_node - start_node;
 
             // Build shard row pointers (relative to shard start)
-            let shard_edge_start =
-                usize::try_from(row_ptrs[start_node]).expect("u32 row pointer fits usize");
-            let shard_edge_end =
-                usize::try_from(row_ptrs[end_node]).expect("u32 row pointer fits usize");
+            let shard_edge_start = usize::try_from(row_ptrs[start_node]).map_err(|_| {
+                GraphError::UnsupportedGraphSize {
+                    reason: "row pointer does not fit in usize on this target".to_string(),
+                }
+            })?;
+            let shard_edge_end = usize::try_from(row_ptrs[end_node]).map_err(|_| {
+                GraphError::UnsupportedGraphSize {
+                    reason: "row pointer does not fit in usize on this target".to_string(),
+                }
+            })?;
 
             let mut shard_row_ptrs = Vec::with_capacity(shard_node_count + 1);
             for i in start_node..=end_node {
@@ -602,6 +608,17 @@ mod tests {
 
         // Invalid shard index
         assert!(graph.shard_to_global(999, 0).is_none());
+    }
+
+    #[test]
+    fn shard_to_global_returns_none_for_invalid_offset() {
+        let graph = CsrBuilder::new()
+            .with_edges([(0, 1), (1, 2)])
+            .build()
+            .unwrap();
+        let shard = &graph.shards()[0];
+
+        assert!(graph.shard_to_global(0, shard.node_count()).is_none());
     }
 
     #[test]
