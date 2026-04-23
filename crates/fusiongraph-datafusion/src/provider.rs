@@ -22,7 +22,6 @@ use fusiongraph_core::{CsrGraph, GraphStatistics};
 use fusiongraph_ontology::{IdType, Ontology};
 
 use crate::error::DataFusionError;
-use crate::exec::GraphTraversalExec;
 
 /// A `TableProvider` that exposes graph topology alongside relational data.
 #[derive(Debug)]
@@ -92,9 +91,8 @@ impl GraphTableProvider {
         // Build schema from node definition
         let id_type = match self.ontology.settings.default_node_id_type {
             IdType::U32 => DataType::UInt32,
-            IdType::U64 => DataType::UInt64,
-            IdType::U128 => DataType::UInt128,
-            IdType::String => DataType::UInt64,
+            IdType::U64 | IdType::String => DataType::UInt64,
+            IdType::U128 => DataType::FixedSizeBinary(16),
         };
 
         let mut fields = vec![Field::new("node_id", id_type, false)];
@@ -118,8 +116,8 @@ impl GraphTableProvider {
 
         let id_type = match self.ontology.settings.default_node_id_type {
             IdType::U32 => DataType::UInt32,
-            IdType::U64 => DataType::UInt64,
-            IdType::U128 | IdType::String => DataType::Utf8,
+            IdType::U64 | IdType::String => DataType::UInt64,
+            IdType::U128 => DataType::FixedSizeBinary(16),
         };
 
         let mut fields = vec![
@@ -174,7 +172,7 @@ impl GraphTableProvider {
     pub async fn create_traversal_plan(
         &self,
         _state: &dyn Session,
-        spec: TraversalSpec,
+        _spec: TraversalSpec,
         _filters: &[Expr],
     ) -> std::result::Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         if !self.materialized {
@@ -183,8 +181,9 @@ impl GraphTableProvider {
             });
         }
 
-        let exec = GraphTraversalExec::new(Arc::clone(&self.graph), spec);
-        Ok(Arc::new(exec))
+        Err(DataFusionError::NotImplemented(
+            "Graph traversal execution is not yet implemented".to_string(),
+        ))
     }
 }
 
@@ -251,6 +250,20 @@ properties = ["since"]
         .unwrap()
     }
 
+    fn test_ontology_with_id_type(id_type: IdType) -> Ontology {
+        let mut ontology = test_ontology();
+        ontology.settings.default_node_id_type = id_type;
+        ontology
+    }
+
+    fn assert_id_fields(schema: &Schema, expected: DataType) {
+        for field_name in ["node_id", "source_id", "target_id"] {
+            if let Ok(field) = schema.field_with_name(field_name) {
+                assert_eq!(field.data_type(), &expected);
+            }
+        }
+    }
+
     #[test]
     fn provider_creation() {
         let provider = GraphTableProvider::new(test_ontology(), test_schema());
@@ -301,10 +314,54 @@ properties = ["since"]
     }
 
     #[test]
+    fn schemas_map_string_ids_to_hashed_uint64() {
+        let provider =
+            GraphTableProvider::new(test_ontology_with_id_type(IdType::String), test_schema());
+
+        let node_schema = provider
+            .node_schema("User")
+            .expect("User schema should exist");
+        let edge_schema = provider
+            .edge_schema("FOLLOWS")
+            .expect("FOLLOWS schema should exist");
+
+        assert_id_fields(&node_schema, DataType::UInt64);
+        assert_id_fields(&edge_schema, DataType::UInt64);
+    }
+
+    #[test]
+    fn schemas_map_u128_ids_to_fixed_size_binary() {
+        let provider =
+            GraphTableProvider::new(test_ontology_with_id_type(IdType::U128), test_schema());
+
+        let node_schema = provider
+            .node_schema("User")
+            .expect("User schema should exist");
+        let edge_schema = provider
+            .edge_schema("FOLLOWS")
+            .expect("FOLLOWS schema should exist");
+
+        assert_id_fields(&node_schema, DataType::FixedSizeBinary(16));
+        assert_id_fields(&edge_schema, DataType::FixedSizeBinary(16));
+    }
+
+    #[test]
     fn edge_schema_returns_none_for_unknown() {
         let provider = GraphTableProvider::new(test_ontology(), test_schema());
 
         assert!(provider.edge_schema("UNKNOWN").is_none());
+    }
+
+    #[tokio::test]
+    async fn materialize_returns_not_implemented_and_remains_unmaterialized() {
+        let mut provider = GraphTableProvider::new(test_ontology(), test_schema());
+        let ctx = datafusion::prelude::SessionContext::new();
+        let state = ctx.state();
+
+        let err = provider.materialize(&state).await.unwrap_err();
+
+        assert!(matches!(err, DataFusionError::NotImplemented(_)));
+        assert!(!provider.is_materialized());
     }
 
     #[tokio::test]
@@ -324,5 +381,28 @@ properties = ["since"]
 
         let result = provider.create_traversal_plan(&state, spec, &[]).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_traversal_plan_reports_unimplemented_execution() {
+        let mut provider = GraphTableProvider::new(test_ontology(), test_schema());
+        provider.materialized = true;
+        let spec = TraversalSpec {
+            start: vec![fusiongraph_core::NodeId::new(1)],
+            max_depth: 3,
+            max_nodes: None,
+            algorithm: TraversalAlgorithm::Bfs,
+            direction: TraversalDirection::Outgoing,
+        };
+
+        let ctx = datafusion::prelude::SessionContext::new();
+        let state = ctx.state();
+
+        let err = match provider.create_traversal_plan(&state, spec, &[]).await {
+            Ok(_) => panic!("traversal plan creation should be gated until execution exists"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, DataFusionError::NotImplemented(_)));
     }
 }

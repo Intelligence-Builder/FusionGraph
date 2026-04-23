@@ -3,6 +3,12 @@
 //! The CSR format stores graphs in contiguous memory for cache-efficient traversal.
 //! Micro-sharding partitions the graph into 64MB chunks to prevent compaction walls.
 
+#![allow(
+    clippy::missing_const_for_fn,
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use
+)]
+
 mod builder;
 mod shard;
 

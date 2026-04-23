@@ -3,6 +3,8 @@
 //! The delta layer stores insertions and deletions (tombstones) that
 //! haven't yet been compacted into the base CSR layer.
 
+#![allow(clippy::must_use_candidate)]
+
 use dashmap::{DashMap, DashSet};
 
 use crate::types::{EdgeData, NodeId};
