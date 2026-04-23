@@ -156,12 +156,27 @@ impl ExecutionPlan for GraphTraversalExec {
 
         // Build ListArray for paths
         let path_values: Vec<u64> = all_paths.iter().flatten().copied().collect();
-        let offsets: Vec<i32> = std::iter::once(0)
-            .chain(all_paths.iter().scan(0i32, |acc, path| {
-                *acc += path.len() as i32;
-                Some(*acc)
-            }))
-            .collect();
+        let offsets: Vec<i32> = all_paths
+            .iter()
+            .try_fold(vec![0_i32], |mut offsets, path| {
+                let path_len = i32::try_from(path.len()).map_err(|_| {
+                    datafusion::error::DataFusionError::Execution(
+                        "traversal path length exceeds Arrow list offset capacity".to_string(),
+                    )
+                })?;
+                let next = offsets
+                    .last()
+                    .copied()
+                    .unwrap_or_default()
+                    .checked_add(path_len)
+                    .ok_or_else(|| {
+                        datafusion::error::DataFusionError::Execution(
+                            "traversal path offsets exceed Arrow list offset capacity".to_string(),
+                        )
+                    })?;
+                offsets.push(next);
+                Ok::<_, datafusion::error::DataFusionError>(offsets)
+            })?;
 
         let values_array = UInt64Array::from(path_values);
         let path_array: ArrayRef = Arc::new(ListArray::new(
@@ -171,10 +186,8 @@ impl ExecutionPlan for GraphTraversalExec {
             None,
         ));
 
-        let batch = RecordBatch::try_new(
-            self.schema(),
-            vec![node_id_array, depth_array, path_array],
-        )?;
+        let batch =
+            RecordBatch::try_new(self.schema(), vec![node_id_array, depth_array, path_array])?;
 
         let schema = self.schema();
         let stream = stream::once(async move { Ok(batch) });
@@ -203,8 +216,7 @@ mod tests {
 
     fn build_test_graph() -> Arc<CsrGraph> {
         // Build a simple graph: 0 -> 1 -> 2, 0 -> 3
-        let builder = CsrBuilder::new()
-            .with_edges([(0, 1), (1, 2), (0, 3)]);
+        let builder = CsrBuilder::new().with_edges([(0, 1), (1, 2), (0, 3)]);
         Arc::new(builder.build().unwrap())
     }
 
