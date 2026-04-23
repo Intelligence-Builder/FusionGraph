@@ -550,6 +550,7 @@ The circuit breaker pattern prevents cascading failures when external dependenci
 ```rust
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::time::Duration;
+use fusiongraph_core::GraphError;
 
 /// Circuit breaker states.
 pub enum CircuitState {
@@ -577,7 +578,7 @@ pub struct CircuitBreaker {
 impl CircuitBreaker {
     /// Check if request should proceed.
     /// Returns Ok(()) or Err(GraphError::CircuitOpen).
-    pub fn check(&self) -> Result<()>;
+    pub fn check(&self) -> Result<(), GraphError>;
     
     /// Record a successful operation (resets failure count).
     pub fn record_success(&self);

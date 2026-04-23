@@ -1,7 +1,7 @@
 # FusionGraph Documentation Integration Guide
 
 **Repository:** https://github.com/Intelligence-Builder/FusionGraph  
-**Local Path:** /Users/robertstanley/Desktop/FusionGraph
+**Local Path:** `$REPO_ROOT/FusionGraph`
 
 This guide shows how to integrate the generated documentation into your FusionGraph repository.
 
@@ -65,7 +65,7 @@ FusionGraph/
 From `/mnt/user-data/outputs/`, copy these files to your repository:
 
 ```bash
-cd /Users/robertstanley/Desktop/FusionGraph
+cd "$REPO_ROOT/FusionGraph"
 
 # Main repository files
 cp /mnt/user-data/outputs/FUSIONGRAPH_README_EXPANDED.md README.md
