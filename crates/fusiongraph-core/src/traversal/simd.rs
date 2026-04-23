@@ -250,23 +250,54 @@ mod tests {
         assert_eq!(backend.name(), backend_name());
     }
 
-    #[test]
-    fn all_backends_produce_same_results() {
+    fn assert_backend_matches_scalar(backend: &dyn SimdBackend) {
         let neighbors = [0u32, 5, 10, 15, 63, 64, 100];
         let mut visited = vec![0u64; 2];
         visited[0] = (1u64 << 5) | (1u64 << 15);
 
         let scalar = ScalarBackend;
-        let expected = scalar.filter_unvisited(&neighbors, &visited);
-
-        let backend = select_backend();
-        let actual = backend.filter_unvisited(&neighbors, &visited);
+        let expected_unvisited = scalar.filter_unvisited(&neighbors, &visited);
+        let actual_unvisited = backend.filter_unvisited(&neighbors, &visited);
 
         assert_eq!(
-            actual,
-            expected,
+            actual_unvisited,
+            expected_unvisited,
             "Backend {} differs from scalar",
             backend.name()
         );
+
+        let nodes = [0u32, 64, 100, 127];
+        let mut expected_visited = visited.clone();
+        let mut actual_visited = visited;
+
+        scalar.set_visited_batch(&nodes, &mut expected_visited);
+        backend.set_visited_batch(&nodes, &mut actual_visited);
+
+        assert_eq!(
+            actual_visited,
+            expected_visited,
+            "Backend {} visited bitset differs from scalar",
+            backend.name()
+        );
+    }
+
+    #[test]
+    fn compiled_backends_produce_same_results() {
+        assert_backend_matches_scalar(&ScalarBackend);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            assert_backend_matches_scalar(&Avx2Backend);
+            assert_backend_matches_scalar(&Avx512Backend);
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        assert_backend_matches_scalar(&NeonBackend);
+    }
+
+    #[test]
+    fn selected_backend_produces_same_results() {
+        let backend = select_backend();
+        assert_backend_matches_scalar(backend.as_ref());
     }
 }

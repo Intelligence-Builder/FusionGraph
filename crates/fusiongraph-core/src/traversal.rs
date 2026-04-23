@@ -11,6 +11,8 @@
 //! neighbor evaluation. Use [`simd::select_backend`] for automatic runtime
 //! detection of the best available backend.
 
+#![allow(clippy::missing_const_for_fn, clippy::must_use_candidate)]
+
 mod bfs;
 pub mod simd;
 

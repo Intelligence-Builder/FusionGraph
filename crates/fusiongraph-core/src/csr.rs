@@ -3,6 +3,12 @@
 //! The CSR format stores graphs in contiguous memory for cache-efficient traversal.
 //! Micro-sharding partitions the graph into 64MB chunks to prevent compaction walls.
 
+#![allow(
+    clippy::missing_const_for_fn,
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use
+)]
+
 mod builder;
 mod shard;
 
@@ -80,8 +86,9 @@ impl CsrGraph {
     }
 
     /// Returns a reference to the shards.
+    #[cfg(test)]
     #[inline]
-    pub fn shards(&self) -> &[Arc<CsrShard>] {
+    pub(crate) fn shards(&self) -> &[Arc<CsrShard>] {
         &self.shards
     }
 
@@ -101,18 +108,26 @@ impl CsrGraph {
     #[inline]
     pub fn global_to_shard(&self, node: NodeId) -> Option<(usize, usize)> {
         let id = Self::node_index(node)?;
-        for (idx, shard) in self.shards.iter().enumerate() {
-            if shard.contains(id) {
-                return Some((idx, id - shard.node_range().start));
-            }
+        let shard_idx = self
+            .shards
+            .partition_point(|shard| shard.node_range().start <= id)
+            .checked_sub(1)?;
+        let shard = self.shards.get(shard_idx)?;
+
+        if shard.contains(id) {
+            Some((shard_idx, id - shard.node_range().start))
+        } else {
+            None
         }
-        None
     }
 
     /// Converts (`shard_index`, `local_offset`) to a global `NodeId`.
     #[inline]
     pub fn shard_to_global(&self, shard_idx: usize, offset: usize) -> Option<NodeId> {
         self.shards.get(shard_idx).and_then(|shard| {
+            if offset >= shard.node_count() {
+                return None;
+            }
             let global = shard.node_range().start + offset;
             u64::try_from(global).ok().map(NodeId::new)
         })
@@ -288,8 +303,7 @@ mod tests {
     #[test]
     fn neighbors_iteration() {
         let graph = CsrGraph::from_edges(&[(0, 1), (0, 2), (0, 3)]);
-        let neighbors: Vec<_> = graph.neighbors(NodeId::new(0)).collect();
-        assert_eq!(neighbors.len(), 3);
+        assert_eq!(graph.neighbors(NodeId::new(0)).count(), 3);
     }
 
     #[test]
@@ -305,12 +319,16 @@ mod tests {
     #[test]
     fn neighbors_deduplicate_delta_edges_against_base() {
         let graph = CsrGraph::from_edges(&[(0, 1), (0, 2)]);
-        graph
-            .delta()
-            .insert(NodeId::new(0), NodeId::new(2), Default::default());
-        graph
-            .delta()
-            .insert(NodeId::new(0), NodeId::new(3), Default::default());
+        graph.delta().insert(
+            NodeId::new(0),
+            NodeId::new(2),
+            crate::types::EdgeData::default(),
+        );
+        graph.delta().insert(
+            NodeId::new(0),
+            NodeId::new(3),
+            crate::types::EdgeData::default(),
+        );
 
         let neighbors: Vec<_> = graph.neighbors(NodeId::new(0)).collect();
 
@@ -331,9 +349,11 @@ mod tests {
     #[test]
     fn out_degree_does_not_double_count_delta_duplicates() {
         let graph = CsrGraph::from_edges(&[(0, 1)]);
-        graph
-            .delta()
-            .insert(NodeId::new(0), NodeId::new(1), Default::default());
+        graph.delta().insert(
+            NodeId::new(0),
+            NodeId::new(1),
+            crate::types::EdgeData::default(),
+        );
 
         assert_eq!(graph.out_degree(NodeId::new(0)), 1);
     }

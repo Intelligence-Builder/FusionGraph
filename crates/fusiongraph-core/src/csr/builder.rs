@@ -239,23 +239,29 @@ impl CsrBuilder {
 
             // Adjust based on actual memory usage to stay close to shard_size
             let mut shard_bytes =
-                Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
+                Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge)?;
 
             // If we're over the shard size and have more than 1 node, shrink
             while shard_bytes > self.config.shard_size && end_node > start_node + 1 {
                 end_node -= 1;
                 shard_bytes =
-                    Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
+                    Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge)?;
             }
 
             // Extract shard data
             let shard_node_count = end_node - start_node;
 
             // Build shard row pointers (relative to shard start)
-            let shard_edge_start =
-                usize::try_from(row_ptrs[start_node]).expect("u32 row pointer fits usize");
-            let shard_edge_end =
-                usize::try_from(row_ptrs[end_node]).expect("u32 row pointer fits usize");
+            let shard_edge_start = usize::try_from(row_ptrs[start_node]).map_err(|_| {
+                GraphError::UnsupportedGraphSize {
+                    reason: "row pointer does not fit in usize on this target".to_string(),
+                }
+            })?;
+            let shard_edge_end = usize::try_from(row_ptrs[end_node]).map_err(|_| {
+                GraphError::UnsupportedGraphSize {
+                    reason: "row pointer does not fit in usize on this target".to_string(),
+                }
+            })?;
 
             let mut shard_row_ptrs = Vec::with_capacity(shard_node_count + 1);
             for i in start_node..=end_node {
@@ -297,15 +303,22 @@ impl CsrBuilder {
         end_node: usize,
         row_ptrs: &[u32],
         bytes_per_edge: usize,
-    ) -> usize {
+    ) -> Result<usize> {
         let node_count = end_node - start_node;
-        let edge_start = usize::try_from(row_ptrs[start_node]).expect("u32 row pointer fits usize");
-        let edge_end = usize::try_from(row_ptrs[end_node]).expect("u32 row pointer fits usize");
+        let edge_start = usize::try_from(row_ptrs[start_node]).map_err(|_| {
+            GraphError::UnsupportedGraphSize {
+                reason: "row pointer does not fit in usize on this target".to_string(),
+            }
+        })?;
+        let edge_end =
+            usize::try_from(row_ptrs[end_node]).map_err(|_| GraphError::UnsupportedGraphSize {
+                reason: "row pointer does not fit in usize on this target".to_string(),
+            })?;
         let edge_count = edge_end - edge_start;
 
         // row_ptrs: (node_count + 1) * 4 bytes
         // col_indices + optional weights: edge_count * bytes_per_edge
-        (node_count + 1) * std::mem::size_of::<u32>() + edge_count * bytes_per_edge
+        Ok((node_count + 1) * std::mem::size_of::<u32>() + edge_count * bytes_per_edge)
     }
 
     fn validate_edge_ids(&self) -> Result<()> {
@@ -438,12 +451,7 @@ mod tests {
             let node = NodeId::new(node_id);
             if let Some((shard_idx, offset)) = graph.global_to_shard(node) {
                 let recovered = graph.shard_to_global(shard_idx, offset);
-                assert_eq!(
-                    recovered,
-                    Some(node),
-                    "Roundtrip failed for node {}",
-                    node_id
-                );
+                assert_eq!(recovered, Some(node), "Roundtrip failed for node {node_id}");
             }
         }
     }
@@ -465,8 +473,7 @@ mod tests {
             let result = graph.global_to_shard(node);
             assert!(
                 result.is_some(),
-                "global_to_shard failed for node {}",
-                node_id
+                "global_to_shard failed for node {node_id}"
             );
 
             let (shard_idx, offset) = result.unwrap();
@@ -474,10 +481,7 @@ mod tests {
             assert_eq!(
                 recovered,
                 Some(node),
-                "Roundtrip failed for node {} (shard={}, offset={})",
-                node_id,
-                shard_idx,
-                offset
+                "Roundtrip failed for node {node_id} (shard={shard_idx}, offset={offset})"
             );
         }
     }
@@ -543,8 +547,7 @@ mod tests {
                 // Range should start where previous ended
                 assert_eq!(
                     range.start, covered_nodes,
-                    "Gap in shard coverage at shard {}",
-                    shard_idx
+                    "Gap in shard coverage at shard {shard_idx}"
                 );
 
                 covered_nodes = range.end;
@@ -602,6 +605,17 @@ mod tests {
 
         // Invalid shard index
         assert!(graph.shard_to_global(999, 0).is_none());
+    }
+
+    #[test]
+    fn shard_to_global_returns_none_for_invalid_offset() {
+        let graph = CsrBuilder::new()
+            .with_edges([(0, 1), (1, 2)])
+            .build()
+            .unwrap();
+        let shard = &graph.shards()[0];
+
+        assert!(graph.shard_to_global(0, shard.node_count()).is_none());
     }
 
     #[test]

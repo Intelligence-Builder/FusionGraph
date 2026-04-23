@@ -4,6 +4,8 @@
 //! - Subsystems: ONT, CSR, DLT, TRV, FFI, MEM, SYS
 //! - Severity: F (Fatal), E (Error), W (Warning)
 
+#![allow(clippy::missing_const_for_fn, clippy::must_use_candidate)]
+
 use thiserror::Error;
 
 use crate::types::NodeId;
