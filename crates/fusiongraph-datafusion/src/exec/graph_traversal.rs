@@ -134,20 +134,24 @@ impl ExecutionPlan for GraphTraversalExec {
             )));
         }
 
-        // Execute BFS for each start node and collect results
-        let mut all_node_ids: Vec<u64> = Vec::new();
-        let mut all_depths: Vec<u32> = Vec::new();
-        let mut all_paths: Vec<Vec<u64>> = Vec::new();
+        // Execute a single multi-source BFS so each reachable node is emitted once
+        // at its minimum depth from the closest start node.
+        let result = fusiongraph_core::traversal::bfs::bfs_multi(
+            &self.graph,
+            &self.spec.start,
+            self.spec.max_depth,
+        );
 
-        for &start in &self.spec.start {
-            let result = bfs(&self.graph, start, self.spec.max_depth);
+        let mut all_node_ids: Vec<u64> = Vec::with_capacity(result.visited.len());
+        let mut all_depths: Vec<u32> = Vec::with_capacity(result.visited.len());
+        let mut all_paths: Vec<Vec<u64>> = Vec::with_capacity(result.visited.len());
 
-            for (idx, &node_id) in result.visited.iter().enumerate() {
-                all_node_ids.push(node_id.as_u64());
-                all_depths.push(result.depths[idx]);
-                // Build path from start to this node (simplified: just start -> node)
-                all_paths.push(vec![start.as_u64(), node_id.as_u64()]);
-            }
+        for (idx, &node_id) in result.visited.iter().enumerate() {
+            all_node_ids.push(node_id.as_u64());
+            all_depths.push(result.depths[idx]);
+            // Preserve the existing simplified path behavior without encoding
+            // per-start concatenation semantics in the output schema.
+            all_paths.push(vec![node_id.as_u64()]);
         }
 
         // Build Arrow arrays
