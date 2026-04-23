@@ -28,6 +28,10 @@ pub enum DataFusionError {
         reason: String,
     },
 
+    /// Feature is not implemented yet.
+    #[error("FG-DFN-E003: Not implemented: {0}")]
+    NotImplemented(String),
+
     /// Operator execution failed.
     #[error("FG-DFN-E002: Execution failed in {operator}: {reason}")]
     ExecutionFailed {

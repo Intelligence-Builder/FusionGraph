@@ -5,6 +5,8 @@
 //! The traversal specification already models additional algorithms, but DFS
 //! and shortest-path execution are reserved for future implementation.
 
+#![allow(clippy::missing_const_for_fn, clippy::must_use_candidate)]
+
 mod bfs;
 
 pub use bfs::{bfs, BfsResult};
