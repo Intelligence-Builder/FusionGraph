@@ -85,6 +85,12 @@ impl CsrGraph {
         self.shards.len()
     }
 
+    /// Returns a reference to the shards.
+    #[inline]
+    pub fn shards(&self) -> &[Arc<CsrShard>] {
+        &self.shards
+    }
+
     /// Returns true if the graph contains the given node.
     #[inline]
     pub fn contains(&self, node: NodeId) -> bool {
