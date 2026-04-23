@@ -124,17 +124,12 @@ impl CsrBuilder {
         // Build CSR arrays
         let (row_ptrs, col_indices, weights) = self.build_csr_arrays(node_count)?;
 
-        // For now, create a single shard (multi-shard logic to be added in #6)
-        let shard = CsrShard::new(
-            0,
-            0..node_count,
-            Arc::from(row_ptrs),
-            Arc::from(col_indices),
-            weights.map(Arc::from),
-        );
+        // Partition into shards based on configured shard_size
+        let shards =
+            self.partition_into_shards(node_count, &row_ptrs, &col_indices, weights.as_deref())?;
 
         Ok(CsrGraph {
-            shards: vec![Arc::new(shard)],
+            shards,
             node_count,
             edge_count: self.edges.len(),
             delta: Arc::new(DeltaLayer::new()),
@@ -203,6 +198,114 @@ impl CsrBuilder {
         }
 
         Ok((row_ptrs, col_indices, weights))
+    }
+
+    /// Partitions the CSR arrays into shards based on the configured shard size.
+    ///
+    /// Each shard targets approximately `shard_size` bytes of memory, containing
+    /// a contiguous range of node IDs with their associated row pointers,
+    /// column indices, and optional weights.
+    fn partition_into_shards(
+        &self,
+        node_count: usize,
+        row_ptrs: &[u32],
+        col_indices: &[u32],
+        weights: Option<&[f32]>,
+    ) -> Result<Vec<Arc<CsrShard>>> {
+        if node_count == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Calculate memory per edge: 4 bytes col_idx + optional 4 bytes weight
+        let bytes_per_edge = if weights.is_some() { 8usize } else { 4usize };
+        let row_ptr_size = std::mem::size_of::<u32>();
+
+        // Estimate nodes per shard based on average degree
+        let total_edge_bytes = col_indices.len().saturating_mul(bytes_per_edge);
+        let total_row_bytes = (node_count + 1).saturating_mul(row_ptr_size);
+        let total_bytes = total_row_bytes.saturating_add(total_edge_bytes);
+        let avg_bytes_per_node = total_bytes.div_ceil(node_count).max(1);
+
+        // Target nodes per shard (at least 1 node per shard).
+        let target_nodes_per_shard = self.config.shard_size.div_ceil(avg_bytes_per_node).max(1);
+
+        let mut shards = Vec::new();
+        let mut start_node = 0usize;
+        let mut shard_id = 0u32;
+
+        while start_node < node_count {
+            // Determine end node for this shard
+            let mut end_node = (start_node + target_nodes_per_shard).min(node_count);
+
+            // Adjust based on actual memory usage to stay close to shard_size
+            let mut shard_bytes =
+                Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
+
+            // If we're over the shard size and have more than 1 node, shrink
+            while shard_bytes > self.config.shard_size && end_node > start_node + 1 {
+                end_node -= 1;
+                shard_bytes =
+                    Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
+            }
+
+            // Extract shard data
+            let shard_node_count = end_node - start_node;
+
+            // Build shard row pointers (relative to shard start)
+            let shard_edge_start =
+                usize::try_from(row_ptrs[start_node]).expect("u32 row pointer fits usize");
+            let shard_edge_end =
+                usize::try_from(row_ptrs[end_node]).expect("u32 row pointer fits usize");
+
+            let mut shard_row_ptrs = Vec::with_capacity(shard_node_count + 1);
+            for i in start_node..=end_node {
+                let relative_ptr = row_ptrs[i] - row_ptrs[start_node];
+                shard_row_ptrs.push(relative_ptr);
+            }
+
+            // Extract column indices for this shard
+            let shard_col_indices: Vec<u32> =
+                col_indices[shard_edge_start..shard_edge_end].to_vec();
+
+            // Extract weights if present
+            let shard_weights = weights.map(|w| w[shard_edge_start..shard_edge_end].to_vec());
+
+            let shard = CsrShard::new(
+                shard_id,
+                start_node..end_node,
+                Arc::from(shard_row_ptrs),
+                Arc::from(shard_col_indices),
+                shard_weights.map(Arc::from),
+            );
+
+            shards.push(Arc::new(shard));
+
+            start_node = end_node;
+            shard_id = shard_id
+                .checked_add(1)
+                .ok_or_else(|| GraphError::UnsupportedGraphSize {
+                    reason: "shard count exceeds u32::MAX".to_string(),
+                })?;
+        }
+
+        Ok(shards)
+    }
+
+    /// Calculates the memory usage for a potential shard.
+    fn calculate_shard_memory(
+        start_node: usize,
+        end_node: usize,
+        row_ptrs: &[u32],
+        bytes_per_edge: usize,
+    ) -> usize {
+        let node_count = end_node - start_node;
+        let edge_start = usize::try_from(row_ptrs[start_node]).expect("u32 row pointer fits usize");
+        let edge_end = usize::try_from(row_ptrs[end_node]).expect("u32 row pointer fits usize");
+        let edge_count = edge_end - edge_start;
+
+        // row_ptrs: (node_count + 1) * 4 bytes
+        // col_indices + optional weights: edge_count * bytes_per_edge
+        (node_count + 1) * std::mem::size_of::<u32>() + edge_count * bytes_per_edge
     }
 
     fn validate_edge_ids(&self) -> Result<()> {
@@ -297,5 +400,230 @@ mod tests {
             GraphError::InvalidEdge { from, to }
                 if from == NodeId::new(0) && to == NodeId::new(u64::from(u32::MAX) + 1)
         ));
+    }
+
+    // =========================================================================
+    // Shard Partitioning Tests (Issue #6)
+    // =========================================================================
+
+    #[test]
+    fn shard_partitioning_creates_multiple_shards_for_small_shard_size() {
+        // Create a graph with enough data to require multiple shards
+        // Each edge needs ~4 bytes (col_index), plus row_ptrs
+        // With shard_size = 32 bytes, we should get multiple shards
+        let edges: Vec<(u64, u64)> = (0..20).map(|i| (i, i + 1)).collect();
+
+        let graph = CsrBuilder::new()
+            .with_shard_size(32) // Very small shard size to force partitioning
+            .with_edges(edges)
+            .build()
+            .unwrap();
+
+        assert!(
+            graph.shard_count() > 1,
+            "Expected multiple shards, got {}",
+            graph.shard_count()
+        );
+    }
+
+    #[test]
+    fn global_to_shard_roundtrip_single_shard() {
+        let graph = CsrBuilder::new()
+            .with_edges([(0, 1), (1, 2), (2, 3)])
+            .build()
+            .unwrap();
+
+        // Test roundtrip for all nodes
+        for node_id in 0..4 {
+            let node = NodeId::new(node_id);
+            if let Some((shard_idx, offset)) = graph.global_to_shard(node) {
+                let recovered = graph.shard_to_global(shard_idx, offset);
+                assert_eq!(
+                    recovered,
+                    Some(node),
+                    "Roundtrip failed for node {}",
+                    node_id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn global_to_shard_roundtrip_multiple_shards() {
+        // Force multiple shards with small shard size
+        let edges: Vec<(u64, u64)> = (0..50).map(|i| (i, i + 1)).collect();
+
+        let graph = CsrBuilder::new()
+            .with_shard_size(64) // Small enough to create multiple shards
+            .with_edges(edges)
+            .build()
+            .unwrap();
+
+        // Test roundtrip for all nodes across all shards
+        for node_id in 0..51 {
+            let node = NodeId::new(node_id);
+            let result = graph.global_to_shard(node);
+            assert!(
+                result.is_some(),
+                "global_to_shard failed for node {}",
+                node_id
+            );
+
+            let (shard_idx, offset) = result.unwrap();
+            let recovered = graph.shard_to_global(shard_idx, offset);
+            assert_eq!(
+                recovered,
+                Some(node),
+                "Roundtrip failed for node {} (shard={}, offset={})",
+                node_id,
+                shard_idx,
+                offset
+            );
+        }
+    }
+
+    #[test]
+    fn cross_shard_neighbor_access() {
+        // Create edges that cross shard boundaries
+        // Node 0 -> [10, 20, 30, 40] - neighbors likely in different shards
+        let mut edges: Vec<(u64, u64)> = vec![(0, 10), (0, 20), (0, 30), (0, 40)];
+
+        // Add filler edges to create more nodes
+        for i in 1..50 {
+            edges.push((i, i + 1));
+        }
+
+        let graph = CsrBuilder::new()
+            .with_shard_size(64)
+            .with_edges(edges)
+            .build()
+            .unwrap();
+
+        // Node 0's neighbors should still be accessible
+        let neighbors: Vec<_> = graph.neighbors(NodeId::new(0)).collect();
+
+        assert!(
+            neighbors.contains(&NodeId::new(10)),
+            "Missing cross-shard neighbor 10"
+        );
+        assert!(
+            neighbors.contains(&NodeId::new(20)),
+            "Missing cross-shard neighbor 20"
+        );
+        assert!(
+            neighbors.contains(&NodeId::new(30)),
+            "Missing cross-shard neighbor 30"
+        );
+        assert!(
+            neighbors.contains(&NodeId::new(40)),
+            "Missing cross-shard neighbor 40"
+        );
+    }
+
+    #[test]
+    fn shard_boundary_nodes_handled_correctly() {
+        // Create a graph where we can verify boundary behavior
+        let edges: Vec<(u64, u64)> = (0..100).map(|i| (i, i + 1)).collect();
+
+        let graph = CsrBuilder::new()
+            .with_shard_size(128)
+            .with_edges(edges)
+            .build()
+            .unwrap();
+
+        let shard_count = graph.shard_count();
+        assert!(shard_count >= 1);
+
+        // Verify each shard's range is contiguous with the next
+        let mut covered_nodes = 0usize;
+        for shard_idx in 0..shard_count {
+            if let Some(shard) = graph.shards().get(shard_idx) {
+                let range = shard.node_range();
+
+                // Range should start where previous ended
+                assert_eq!(
+                    range.start, covered_nodes,
+                    "Gap in shard coverage at shard {}",
+                    shard_idx
+                );
+
+                covered_nodes = range.end;
+            }
+        }
+
+        // All nodes should be covered
+        assert_eq!(
+            covered_nodes,
+            graph.node_count(),
+            "Not all nodes covered by shards"
+        );
+    }
+
+    #[test]
+    fn shard_partitioning_preserves_edge_count() {
+        let edges: Vec<(u64, u64)> = (0..100).flat_map(|i| [(i, i + 1), (i, i + 2)]).collect();
+
+        let graph = CsrBuilder::new()
+            .with_shard_size(64)
+            .with_edges(edges.clone())
+            .build()
+            .unwrap();
+
+        // Total edges across all shards should match input
+        let total_shard_edges: usize = (0..graph.shard_count())
+            .filter_map(|idx| graph.shards().get(idx))
+            .map(|s| s.edge_count())
+            .sum();
+
+        assert_eq!(
+            total_shard_edges,
+            edges.len(),
+            "Edge count mismatch after sharding"
+        );
+    }
+
+    #[test]
+    fn global_to_shard_returns_none_for_invalid_node() {
+        let graph = CsrBuilder::new()
+            .with_edges([(0, 1), (1, 2)])
+            .build()
+            .unwrap();
+
+        // Node 100 doesn't exist
+        assert!(graph.global_to_shard(NodeId::new(100)).is_none());
+    }
+
+    #[test]
+    fn shard_to_global_returns_none_for_invalid_shard() {
+        let graph = CsrBuilder::new()
+            .with_edges([(0, 1), (1, 2)])
+            .build()
+            .unwrap();
+
+        // Invalid shard index
+        assert!(graph.shard_to_global(999, 0).is_none());
+    }
+
+    #[test]
+    fn weighted_graph_shard_partitioning() {
+        // Test that weighted graphs partition correctly
+        let edges: Vec<(u64, u64, f32)> = (0_u16..50)
+            .map(|i| (u64::from(i), u64::from(i + 1), f32::from(i) * 0.1))
+            .collect();
+
+        let graph = CsrBuilder::new()
+            .with_shard_size(128)
+            .with_weighted_edges(edges)
+            .build()
+            .unwrap();
+
+        // Verify roundtrip works for weighted graph
+        for node_id in 0..51 {
+            let node = NodeId::new(node_id);
+            if let Some((shard_idx, offset)) = graph.global_to_shard(node) {
+                let recovered = graph.shard_to_global(shard_idx, offset);
+                assert_eq!(recovered, Some(node));
+            }
+        }
     }
 }
