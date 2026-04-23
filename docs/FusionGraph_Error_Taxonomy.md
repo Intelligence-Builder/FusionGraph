@@ -115,8 +115,8 @@ OntologyParseError { line: usize, message: String }
 **Recovery:** **FATAL** - Shutdown, alert ops, rebuild from source
 
 ```rust
-#[error("FG-CSR-F001: Memory corruption in shard {shard_id}, checksum {expected} != {actual}")]
-CsrCorruption { shard_id: u32, expected: u64, actual: u64 }
+#[error("FG-CSR-F001: Memory corruption in shard {shard_id} (checksum {expected:x} != {actual:x})")]
+ShardCorruption { shard_id: u32, expected: u64, actual: u64 }
 ```
 
 ### FG-CSR-E001: Build Failed - Out of Memory
@@ -250,11 +250,11 @@ CsrCorruption { shard_id: u32, expected: u64, actual: u64 }
 **User Message:** N/A (crash)  
 **Recovery:** **FATAL** - Bug in external code; ensure proper ownership transfer
 
-### FG-FFI-E001: Invalid Arrow Schema
+### FG-FFI-E003: Invalid Arrow Schema
 
 **Cause:** Imported Arrow data has incompatible schema  
 **Detection:** Schema validation on import  
-**User Message:** `Arrow schema mismatch: expected {expected}, got {actual}`  
+**User Message:** `Invalid Arrow schema`  
 **Recovery:** Fix upstream data producer
 
 ### FG-FFI-E002: Null Pointer
@@ -474,6 +474,24 @@ pub enum GraphError {
     // CSR errors
     #[error("FG-CSR-E001: Out of memory (requested {requested}, available {available})")]
     OutOfMemory { requested: usize, available: usize },
+
+    #[error("FG-CSR-F001: Memory corruption in shard {shard_id} (checksum {expected:x} != {actual:x})")]
+    ShardCorruption { shard_id: u32, expected: u64, actual: u64 },
+
+    #[error("FG-TRV-E001: Node {id} not found")]
+    NodeNotFound { id: NodeId },
+
+    #[error("FG-MEM-E001: Memory limit exceeded ({requested} > {limit})")]
+    MemoryLimitExceeded { requested: usize, limit: usize },
+
+    #[error("FG-ICE-E001: Iceberg connection failed: {message}")]
+    IcebergConnectionFailed { message: String },
+
+    #[error("FG-AUT-E001: Credentials expired")]
+    CredentialExpired,
+
+    #[error("FG-SYS-E001: Circuit breaker open")]
+    CircuitOpen,
     
     // ... etc
     
@@ -494,13 +512,19 @@ impl GraphError {
             Self::OntologyParse { .. } => "FG-ONT-E001",
             Self::DanglingEdge { .. } => "FG-ONT-E003",
             Self::OutOfMemory { .. } => "FG-CSR-E001",
+            Self::ShardCorruption { .. } => "FG-CSR-F001",
+            Self::NodeNotFound { .. } => "FG-TRV-E001",
+            Self::MemoryLimitExceeded { .. } => "FG-MEM-E001",
+            Self::IcebergConnectionFailed { .. } => "FG-ICE-E001",
+            Self::CredentialExpired => "FG-AUT-E001",
+            Self::CircuitOpen => "FG-SYS-E001",
             // ...
         }
     }
     
     pub fn severity(&self) -> Severity {
         match self {
-            Self::CsrCorruption { .. } => Severity::Fatal,
+            Self::ShardCorruption { .. } => Severity::Fatal,
             Self::OutOfMemory { .. } => Severity::Error,
             // ...
         }
@@ -531,7 +555,7 @@ impl CsrGraph {
         if !shard.verify_checksum() {
             // Log fatal, but try to continue with other shards
             tracing::error!(error_code = "FG-CSR-F001", node = ?node, "Shard corrupted");
-            return Err(GraphError::CsrCorruption { 
+            return Err(GraphError::ShardCorruption { 
                 shard_id: shard.id,
                 expected: shard.expected_checksum,
                 actual: shard.actual_checksum(),

@@ -30,7 +30,7 @@ pub enum FfiError {
     },
 
     /// Invalid schema.
-    #[error("FG-FFI-E001: Invalid Arrow schema")]
+    #[error("FG-FFI-E003: Invalid Arrow schema")]
     InvalidSchema,
 }
 
