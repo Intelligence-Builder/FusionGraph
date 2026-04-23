@@ -4,10 +4,19 @@
 //!
 //! The traversal specification already models additional algorithms, but DFS
 //! and shortest-path execution are reserved for future implementation.
+//!
+//! ## SIMD Acceleration
+//!
+//! The `simd` module provides platform-specific SIMD backends for accelerated
+//! neighbor filtering. Use `simd::select_backend()` for runtime detection.
 
 mod bfs;
+pub mod bitset;
+pub mod simd;
 
-pub use bfs::{bfs, BfsResult};
+pub use bfs::{bfs, bfs_multi, BfsResult};
+pub use bitset::AtomicBitset;
+pub use simd::{detect_simd_support, select_backend, ScalarBackend, SimdBackend};
 
 use crate::types::NodeId;
 
