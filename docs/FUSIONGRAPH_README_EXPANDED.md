@@ -312,7 +312,7 @@ cargo bench
 - **Benchmarking:** Performance comparison vs graph databases
 - **Documentation:** Architecture guides, tutorials, examples
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed contribution guidelines.
 
 ---
 
@@ -347,7 +347,7 @@ For detailed technical architecture, see:
 
 ## License
 
-FusionGraph is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+FusionGraph is licensed under the Apache License 2.0. See [LICENSE](../LICENSE) for details.
 
 This project aims to become part of the Apache DataFusion ecosystem and follows Apache Foundation governance principles.
 

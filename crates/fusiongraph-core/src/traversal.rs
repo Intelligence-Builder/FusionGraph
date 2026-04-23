@@ -14,10 +14,15 @@
 #![allow(clippy::missing_const_for_fn, clippy::must_use_candidate)]
 
 mod bfs;
+pub mod bitset;
 pub mod simd;
 
 pub use bfs::{bfs, BfsResult};
-pub use simd::{backend_name, select_backend, ScalarBackend, SimdBackend};
+pub use bitset::AtomicBitset;
+pub use simd::{
+    backend_name, dense_index_to_node_id, node_id_to_dense_index, select_backend, ScalarBackend,
+    SimdBackend,
+};
 
 use crate::types::NodeId;
 

@@ -3,10 +3,30 @@
 //! Provides trait-based SIMD backends with runtime feature detection.
 //! Supports AVX-512, AVX2, Neon, and scalar fallback.
 
+use crate::types::NodeId;
+
+/// Converts a public [`NodeId`] into the dense internal index used by SIMD
+/// traversal kernels.
+///
+/// SIMD backends operate on compact `u32` indices into CSR rows, not the
+/// public `NodeId(u64)` API type. Callers should perform this conversion at
+/// the traversal boundary after validating the graph fits the `u32` CSR
+/// representation.
+#[must_use]
+pub fn node_id_to_dense_index(node: NodeId) -> Option<u32> {
+    u32::try_from(node.as_u64()).ok()
+}
+
+/// Converts a dense internal SIMD index back into a public [`NodeId`].
+#[must_use]
+pub fn dense_index_to_node_id(index: u32) -> NodeId {
+    NodeId::new(u64::from(index))
+}
+
 /// SIMD backend for batch neighbor evaluation during traversal.
 ///
 /// Implementations use platform-specific SIMD instructions to process
-/// multiple neighbors per cycle, reducing branch mispredictions.
+/// multiple dense CSR node indices per cycle, reducing branch mispredictions.
 pub trait SimdBackend: Send + Sync {
     /// Returns the name of this backend (e.g., "avx512", "neon", "scalar").
     fn name(&self) -> &'static str;
@@ -14,20 +34,21 @@ pub trait SimdBackend: Send + Sync {
     /// Returns the batch size this backend processes at once.
     fn batch_size(&self) -> usize;
 
-    /// Batch-evaluates neighbors against a visited bitset.
+    /// Batch-evaluates dense neighbor indices against a visited bitset.
     ///
     /// # Arguments
-    /// * `neighbors` - Slice of neighbor node IDs to evaluate
-    /// * `visited` - Bitset of already-visited nodes (bit index = node ID)
+    /// * `neighbors` - Dense `u32` CSR node indices to evaluate, not public
+    ///   [`NodeId`] values
+    /// * `visited` - Bitset of already-visited dense indices
     ///
     /// # Returns
-    /// Vector of unvisited neighbor IDs
+    /// Vector of unvisited dense neighbor indices
     fn filter_unvisited(&self, neighbors: &[u32], visited: &[u64]) -> Vec<u32>;
 
-    /// Batch-sets visited bits for a slice of node IDs.
+    /// Batch-sets visited bits for a slice of dense node indices.
     ///
     /// # Arguments
-    /// * `nodes` - Node IDs to mark as visited
+    /// * `nodes` - Dense `u32` CSR node indices to mark as visited
     /// * `visited` - Mutable bitset to update
     fn set_visited_batch(&self, nodes: &[u32], visited: &mut [u64]);
 }
