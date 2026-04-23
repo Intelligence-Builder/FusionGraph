@@ -107,18 +107,26 @@ impl CsrGraph {
     #[inline]
     pub fn global_to_shard(&self, node: NodeId) -> Option<(usize, usize)> {
         let id = Self::node_index(node)?;
-        for (idx, shard) in self.shards.iter().enumerate() {
-            if shard.contains(id) {
-                return Some((idx, id - shard.node_range().start));
-            }
+        let shard_idx = self
+            .shards
+            .partition_point(|shard| shard.node_range().start <= id)
+            .checked_sub(1)?;
+        let shard = self.shards.get(shard_idx)?;
+
+        if shard.contains(id) {
+            Some((shard_idx, id - shard.node_range().start))
+        } else {
+            None
         }
-        None
     }
 
     /// Converts (`shard_index`, `local_offset`) to a global `NodeId`.
     #[inline]
     pub fn shard_to_global(&self, shard_idx: usize, offset: usize) -> Option<NodeId> {
         self.shards.get(shard_idx).and_then(|shard| {
+            if offset >= shard.node_count() {
+                return None;
+            }
             let global = shard.node_range().start + offset;
             u64::try_from(global).ok().map(NodeId::new)
         })
