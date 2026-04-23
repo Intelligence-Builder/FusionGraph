@@ -4,10 +4,20 @@
 //!
 //! The traversal specification already models additional algorithms, but DFS
 //! and shortest-path execution are reserved for future implementation.
+//!
+//! ## SIMD Acceleration
+//!
+//! The [`simd`] module provides cross-platform SIMD backends for accelerated
+//! neighbor evaluation. Use [`simd::select_backend`] for automatic runtime
+//! detection of the best available backend.
+
+#![allow(clippy::missing_const_for_fn, clippy::must_use_candidate)]
 
 mod bfs;
+pub mod simd;
 
 pub use bfs::{bfs, BfsResult};
+pub use simd::{backend_name, select_backend, ScalarBackend, SimdBackend};
 
 use crate::types::NodeId;
 

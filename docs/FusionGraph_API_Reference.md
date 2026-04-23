@@ -774,6 +774,103 @@ pub enum GraphError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("FG-SYS-E001: Circuit breaker open, failing fast")]
+    CircuitOpen,
+
+    #[error("FG-SYS-E002: Internal error: {message}")]
+    Internal { message: String },
+}
+```
+
+### 8.1 Circuit Breaker
+
+Thread-safe circuit breaker for protecting against external dependency failures.
+Implemented in `fusiongraph_core::circuit_breaker`.
+
+```rust
+use std::time::Duration;
+use fusiongraph_core::error::GraphError;
+
+/// Circuit breaker states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitState {
+    /// Normal operation - requests flow through.
+    Closed,
+    /// Dependency failing - requests fail fast.
+    Open,
+    /// Testing recovery - limited requests allowed.
+    HalfOpen,
+}
+
+/// Configuration for circuit breaker behavior.
+#[derive(Debug, Clone)]
+pub struct CircuitBreakerConfig {
+    /// Failures before opening circuit (default: 5).
+    pub failure_threshold: u64,
+    /// Time before attempting recovery (default: 30s).
+    pub reset_timeout: Duration,
+    /// Successes in half-open to close circuit (default: 2).
+    pub success_threshold: u64,
+}
+
+/// Thread-safe circuit breaker using atomic operations.
+#[derive(Debug)]
+pub struct CircuitBreaker { /* ... */ }
+
+impl CircuitBreaker {
+    /// Create with custom configuration.
+    pub fn new(config: CircuitBreakerConfig) -> Self;
+    
+    /// Create with default configuration.
+    pub fn with_defaults() -> Self;
+    
+    /// Get current circuit state.
+    pub fn state(&self) -> CircuitState;
+    
+    /// Check if request should proceed.
+    /// Returns `Err(GraphError::CircuitOpen)` if circuit is open.
+    pub fn check(&self) -> Result<(), GraphError>;
+    
+    /// Record successful operation (resets failure count in Closed,
+    /// may close circuit in HalfOpen).
+    pub fn record_success(&self);
+    
+    /// Record failed operation (may open circuit).
+    pub fn record_failure(&self);
+    
+    /// Force reset to Closed state.
+    pub fn reset(&self);
+    
+    /// Current failure count.
+    pub fn failure_count(&self) -> u64;
+}
+```
+
+**Usage:**
+
+```rust
+async fn fetch_table_with_circuit_breaker(
+    iceberg_client: &IcebergClient,
+    name: &str,
+) -> Result<Table, GraphError> {
+    let cb = CircuitBreaker::with_defaults();
+
+    // Guard external calls
+    cb.check()?;  // Fails fast if open
+
+    match iceberg_client.fetch_table(name).await {
+        Ok(table) => {
+            cb.record_success();
+            Ok(table)
+        }
+        Err(e) => {
+            cb.record_failure();
+            Err(GraphError::Internal {
+                message: e.to_string(),
+            })
+        }
+    }
 }
 ```
 

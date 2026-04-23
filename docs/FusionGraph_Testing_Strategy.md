@@ -52,6 +52,8 @@ Test individual functions and structs in isolation.
 | `traversal::dijkstra` | Priority queue, weight handling |
 | `simd::*` | SIMD intrinsics (platform-specific) |
 | `ffi::arrow` | Arrow import/export correctness |
+| `circuit_breaker` | State transitions, failure thresholds, reset timing |
+| `error` | Error codes, severity, retryability |
 
 ### 3.3 Test Patterns
 
