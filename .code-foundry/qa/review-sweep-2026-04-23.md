@@ -56,3 +56,37 @@ The blocker branches were updated on 2026-04-23. Each issue branch now has compl
 | #12 | `feature/issue-12-simd-abstraction` @ `0eef456` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 12 --focus-path crates/fusiongraph-core` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
 
 Current board disposition: all eight issue cards have been moved back to `Review`. Issue comments now include the exact next-pass QA command, expected result, evidence file, and issue-specific checks to preserve.
+
+## Review QA Sweep Rerun
+
+Rerun scope on 2026-04-23: all project cards with `Status = Review` at the start of the rerun:
+
+- #2 / PR #20 / `feature/issue-2-blueprint-reorder`
+- #4 / PR #23 / `fix/issue-4-proptest`
+- #5 / PR #22 / `fix/issue-5-api-alignment`
+- #6 / PR #24 / `fix/issue-6-shard-partitioning`
+- #7 / PR #25 / `fix/issue-7-traversal-execute`
+- #8 / PR #26 / `fix/issue-8-integration-test`
+- #10 / PR #27 / `fix/issue-10-ffi-safety`
+- #11 / PR #28 / `feat/11-circuit-breaker`
+- #12 / PR #21 / `feature/issue-12-simd-abstraction`
+
+Changed-package QA was used for branches touching multiple Rust packages.
+
+| Issue | Branch head | Command | Result | Board update |
+| --- | --- | --- | --- | --- |
+| #2 | `feature/issue-2-blueprint-reorder` @ `a2f2bb2` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 2 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+| #4 | `fix/issue-4-proptest` @ `728d464` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 4 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-ontology` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+| #5 | `fix/issue-5-api-alignment` @ `762778f` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 5 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+| #6 | `fix/issue-6-shard-partitioning` @ `7d3e1c9` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 6 --focus-path crates/fusiongraph-core` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+| #7 | `fix/issue-7-traversal-execute` @ `df34b2c` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 7 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+| #8 | `fix/issue-8-integration-test` @ `9b372ca` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 8 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+| #10 | `fix/issue-10-ffi-safety` @ `956fefa` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 10 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion --focus-path crates/fusiongraph-ffi` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+| #11 | `feat/11-circuit-breaker` @ `de926fa` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 11 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion` | Failed: `Passed 4 / Failed 1 / Warnings 1` | `In Progress` |
+| #12 | `feature/issue-12-simd-abstraction` @ `0eef456` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 12 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` | `Done` |
+
+#11 blockers before the next QA pass:
+
+- Complete `.code-foundry/issues/11/discovery.md`; it still contains `_(answer here)_` placeholders.
+- Run `cargo fmt` and commit the formatting changes shown by QA in `crates/fusiongraph-core/src/error.rs` and `crates/fusiongraph-datafusion/src/exec/csr_builder.rs`.
+- Rerun the exact #11 command above with a clean working tree; expected result is `Passed 6 / Failed 0 / Warnings 0`.
