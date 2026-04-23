@@ -8,6 +8,8 @@ use crate::types::NodeId;
 
 use super::{CsrGraph, CsrShard, DEFAULT_SHARD_SIZE};
 
+type CsrArrays = (Vec<u32>, Vec<u32>, Option<Vec<f32>>);
+
 /// Configuration for CSR building.
 #[derive(Debug, Clone)]
 pub struct CsrBuildConfig {
@@ -67,6 +69,12 @@ impl CsrBuilder {
     }
 
     /// Builds the CSR graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GraphError::InvalidEdge`] when an edge endpoint exceeds the
+    /// supported `u32` node range and [`GraphError::UnsupportedGraphSize`]
+    /// when the graph exceeds this implementation's CSR capacity limits.
     pub fn build(mut self) -> Result<CsrGraph> {
         if self.edges.is_empty() {
             return Ok(CsrGraph::empty());
@@ -134,14 +142,11 @@ impl CsrBuilder {
     }
 
     /// Builds the raw CSR arrays.
-    fn build_csr_arrays(
-        &self,
-        node_count: usize,
-    ) -> Result<(Vec<u32>, Vec<u32>, Option<Vec<f32>>)> {
+    fn build_csr_arrays(&self, node_count: usize) -> Result<CsrArrays> {
         // Count edges per node
         let mut degrees = vec![0u32; node_count];
         for &(src, _) in &self.edges {
-            let src_idx = self.edge_src_index(src, node_count)?;
+            let src_idx = Self::edge_src_index(src, node_count)?;
             let degree = degrees
                 .get_mut(src_idx)
                 .ok_or_else(|| GraphError::InvalidEdge {
@@ -181,7 +186,7 @@ impl CsrBuilder {
         let mut current_pos = row_ptrs[..node_count].to_vec();
 
         for (i, &(src, dst)) in self.edges.iter().enumerate() {
-            let src_idx = self.edge_src_index(src, node_count)?;
+            let src_idx = Self::edge_src_index(src, node_count)?;
             let pos = current_pos[src_idx] as usize;
             col_indices[pos] = u32::try_from(dst).map_err(|_| GraphError::InvalidEdge {
                 from: NodeId::new(src),
@@ -213,7 +218,7 @@ impl CsrBuilder {
         Ok(())
     }
 
-    fn edge_src_index(&self, src: u64, node_count: usize) -> Result<usize> {
+    fn edge_src_index(src: u64, node_count: usize) -> Result<usize> {
         let src_idx = usize::try_from(src).map_err(|_| GraphError::InvalidEdge {
             from: NodeId::new(src),
             to: NodeId::new(src),

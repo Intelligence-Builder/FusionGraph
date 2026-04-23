@@ -617,9 +617,8 @@ mod tests {
         let schema = batch1.schema();
 
         // Combine batches into single partition (required by CSRBuilderExec)
-        let input = Arc::new(
-            MemoryExec::try_new(&[vec![batch1, batch2, batch3]], schema, None).unwrap(),
-        );
+        let input =
+            Arc::new(MemoryExec::try_new(&[vec![batch1, batch2, batch3]], schema, None).unwrap());
 
         let config = CsrBuildConfig {
             shard_size: 64 * 1024 * 1024,

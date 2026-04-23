@@ -1,6 +1,6 @@
-//! FusionGraph FFI - Arrow C Data Interface bindings.
+//! `FusionGraph` FFI - Arrow C Data Interface bindings.
 //!
-//! Provides zero-copy data transfer between FusionGraph and external systems
+//! Provides zero-copy data transfer between `FusionGraph` and external systems
 //! using the Arrow C Data Interface.
 
 #![warn(missing_docs)]
@@ -37,7 +37,12 @@ pub enum FfiError {
 /// Result type for FFI operations.
 pub type Result<T> = std::result::Result<T, FfiError>;
 
-/// Imports a RecordBatch from Arrow C Data Interface structs.
+/// Imports a `RecordBatch` from Arrow C Data Interface structs.
+///
+/// # Errors
+///
+/// Returns an error when Arrow FFI import fails, the imported value is not a
+/// struct array, or the struct columns cannot be assembled into a record batch.
 ///
 /// # Safety
 ///
@@ -74,10 +79,15 @@ pub unsafe fn import_record_batch(
     Ok(batch)
 }
 
-/// Exports a RecordBatch to Arrow C Data Interface format.
+/// Exports a `RecordBatch` to Arrow C Data Interface format.
 ///
 /// Returns the array and schema as FFI structs. The caller is responsible
 /// for eventually releasing the memory.
+///
+/// # Errors
+///
+/// Returns an error when Arrow cannot export the record batch data through the
+/// C Data Interface.
 pub fn export_record_batch(batch: &RecordBatch) -> Result<(FFI_ArrowArray, FFI_ArrowSchema)> {
     let struct_array = StructArray::from(batch.clone());
     let data = struct_array.to_data();
