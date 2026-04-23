@@ -154,10 +154,11 @@ impl GraphTableProvider {
         &mut self,
         _state: &dyn Session,
     ) -> std::result::Result<(), DataFusionError> {
-        // TODO: Implement actual CSR materialization from source tables
-        // For now, mark as materialized
-        self.materialized = true;
-        Ok(())
+        // TODO: Implement actual CSR materialization from source tables.
+        // Until that exists, do not report success or mark the graph as materialized.
+        Err(DataFusionError::NotImplemented(
+            "CSR materialization is not yet implemented".to_string(),
+        ))
     }
 
     /// Creates a traversal execution plan for the graph.
