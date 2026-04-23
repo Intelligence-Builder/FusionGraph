@@ -93,7 +93,8 @@ impl GraphTableProvider {
         let id_type = match self.ontology.settings.default_node_id_type {
             IdType::U32 => DataType::UInt32,
             IdType::U64 => DataType::UInt64,
-            IdType::U128 | IdType::String => DataType::Utf8,
+            IdType::U128 => DataType::UInt128,
+            IdType::String => DataType::UInt64,
         };
 
         let mut fields = vec![Field::new("node_id", id_type, false)];
