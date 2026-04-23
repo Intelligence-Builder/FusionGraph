@@ -622,7 +622,7 @@ mod tests {
 
         let config = CsrBuildConfig {
             shard_size: 64 * 1024 * 1024,
-            ..Default::default()
+            ..CsrBuildConfig::default()
         };
         let builder = CSRBuilderExec::new(input, config);
 
