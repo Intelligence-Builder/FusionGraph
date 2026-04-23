@@ -9,6 +9,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod circuit_breaker;
 pub mod csr;
 pub mod delta;
 pub mod error;
