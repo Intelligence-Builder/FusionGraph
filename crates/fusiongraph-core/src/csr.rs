@@ -113,6 +113,9 @@ impl CsrGraph {
     #[inline]
     pub fn shard_to_global(&self, shard_idx: usize, offset: usize) -> Option<NodeId> {
         self.shards.get(shard_idx).and_then(|shard| {
+            if offset >= shard.node_count() {
+                return None;
+            }
             let global = shard.node_range().start + offset;
             u64::try_from(global).ok().map(NodeId::new)
         })
