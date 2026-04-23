@@ -1,5 +1,5 @@
 //! `FusionGraph` `DataFusion` Integration
-//! 
+//!
 //! This crate provides `DataFusion` integration for `FusionGraph`:
 //! - `GraphTableProvider` implementation of `TableProvider`
 //! - `CSRBuilderExec` physical operator
