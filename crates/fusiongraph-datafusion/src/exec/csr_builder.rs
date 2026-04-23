@@ -616,4 +616,93 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_datafusion_integration_multi_batch() {
+        // Integration test: process multiple batches from a MemoryExec source
+        // through CSRBuilderExec and verify complete graph statistics.
+        let batch1 = create_edge_batch(vec![0, 0, 1], vec![1, 2, 2]);
+        let batch2 = create_edge_batch(vec![2, 3, 3], vec![3, 4, 5]);
+        let batch3 = create_edge_batch(vec![4, 5], vec![5, 0]); // cycle back to 0
+        let schema = batch1.schema();
+
+        // Combine batches into single partition (required by CSRBuilderExec)
+        let input =
+            Arc::new(MemoryExec::try_new(&[vec![batch1, batch2, batch3]], schema, None).unwrap());
+
+        let config = CsrBuildConfig {
+            shard_size: 64 * 1024 * 1024,
+            ..CsrBuildConfig::default()
+        };
+        let builder = CSRBuilderExec::new(input, config);
+
+        // Verify ExecutionPlan properties
+        assert_eq!(builder.name(), "CSRBuilderExec");
+        assert_eq!(builder.children().len(), 1);
+
+        let ctx = SessionContext::new();
+        let task_ctx = ctx.task_ctx();
+
+        let mut stream = builder.execute(0, task_ctx).unwrap();
+        let result = stream.next().await.unwrap().unwrap();
+
+        // Verify output schema
+        assert_eq!(result.schema().fields().len(), 4);
+        assert!(result.schema().field_with_name("node_count").is_ok());
+        assert!(result.schema().field_with_name("edge_count").is_ok());
+        assert!(result.schema().field_with_name("shard_count").is_ok());
+        assert!(result.schema().field_with_name("build_time_ms").is_ok());
+
+        // Verify statistics: 6 unique nodes (0-5), 8 edges total
+        let node_count = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap()
+            .value(0);
+        let edge_count = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap()
+            .value(0);
+
+        assert_eq!(node_count, 6, "Expected 6 nodes");
+        assert_eq!(edge_count, 8, "Expected 8 edges");
+
+        // Verify stream is exhausted
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_csr_builder_reports_graph_metadata() {
+        // Verify the built CSR graph reports the expected node and shard metadata
+        let batch = create_edge_batch(vec![0, 0, 1, 2], vec![1, 2, 2, 3]);
+        let schema = batch.schema();
+
+        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let builder = CSRBuilderExec::new(input, CsrBuildConfig::default());
+
+        let ctx = SessionContext::new();
+        let task_ctx = ctx.task_ctx();
+
+        let mut stream = builder.execute(0, task_ctx).unwrap();
+        let result = stream.next().await.unwrap().unwrap();
+
+        let node_count = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap()
+            .value(0);
+        let shard_count = result
+            .column(2)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap()
+            .value(0);
+
+        assert_eq!(node_count, 4, "Graph should have 4 nodes (0, 1, 2, 3)");
+        assert!(shard_count >= 1, "Should have at least 1 shard");
+    }
 }
