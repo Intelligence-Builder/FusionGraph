@@ -38,4 +38,21 @@ Common blockers:
 
 ## Board Updates
 
-All reviewed issue cards should be moved from `Review` back to `In Progress` because each corresponding PR branch has a failing QA gate.
+Initial QA disposition: all reviewed issue cards were moved from `Review` back to `In Progress` because each corresponding PR branch had a failing QA gate.
+
+## Devwork Follow-Up
+
+The blocker branches were updated on 2026-04-23. Each issue branch now has complete evidence, a clean working tree, and a passing focused QA gate.
+
+| Issue | Branch head | Command | Result |
+| --- | --- | --- | --- |
+| #2 | `feature/issue-2-blueprint-reorder` @ `7692239` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 2 --focus-path crates/fusiongraph-core` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+| #4 | `fix/issue-4-proptest` @ `728d464` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 4 --focus-path crates/fusiongraph-ontology` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+| #5 | `fix/issue-5-api-alignment` @ `762778f` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 5 --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+| #6 | `fix/issue-6-shard-partitioning` @ `7d3e1c9` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 6 --focus-path crates/fusiongraph-core` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+| #7 | `fix/issue-7-traversal-execute` @ `df34b2c` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 7 --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+| #8 | `fix/issue-8-integration-test` @ `9b372ca` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 8 --focus-path crates/fusiongraph-datafusion` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+| #10 | `fix/issue-10-ffi-safety` @ `956fefa` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 10 --focus-path crates/fusiongraph-ffi` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+| #12 | `feature/issue-12-simd-abstraction` @ `0eef456` | `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 12 --focus-path crates/fusiongraph-core` | Passed: `Passed 6 / Failed 0 / Warnings 0` |
+
+Current board disposition: all eight issue cards have been moved back to `Review`. Issue comments now include the exact next-pass QA command, expected result, evidence file, and issue-specific checks to preserve.
