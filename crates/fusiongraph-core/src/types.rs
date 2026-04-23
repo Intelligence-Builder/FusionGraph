@@ -1,5 +1,7 @@
 //! Core type definitions for `FusionGraph`.
 
+#![allow(clippy::must_use_candidate)]
+
 use std::fmt;
 
 /// A unique identifier for a node in the graph.

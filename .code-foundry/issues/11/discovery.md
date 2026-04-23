@@ -18,9 +18,12 @@ Circuit breaker unit tests cover default closed state, opening after the configu
 The circuit breaker currently tracks time using wall-clock milliseconds and atomics, which is adequate for this implementation slice but should be revisited if production code needs injectable clocks or deterministic timeout testing. External dependency call sites are not wired through this breaker yet; that integration remains follow-on work after the core primitive passes QA.
 
 ## Files Changed
+- `.code-foundry/issues/11/discovery.md`
 - `crates/fusiongraph-core/src/circuit_breaker.rs`
 - `crates/fusiongraph-core/src/lib.rs`
 - `crates/fusiongraph-datafusion/src/exec/csr_builder.rs`
 
 ## Test Results
-- `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 11 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion`: passed on 2026-04-23 (`Passed 5 / Failed 0 / Warnings 1`; warning was uncommitted changes before final commit)
+- `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 11 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion`: passed on 2026-04-23.
+- Unit tests passed: `52` core and `29` datafusion tests.
+- Clippy passed with no warnings; formatting passed.
