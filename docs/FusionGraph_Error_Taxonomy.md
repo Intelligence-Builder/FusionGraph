@@ -425,9 +425,39 @@ CsrCorruption { shard_id: u32, expected: u64, actual: u64 }
 
 ---
 
-## 14. Error Handling Patterns
+## 14. System Errors (SYS)
 
-### 14.1 Rust Error Propagation
+### FG-SYS-E001: Circuit Breaker Open
+
+**Cause:** External dependency failure threshold exceeded  
+**Detection:** Circuit breaker state check  
+**User Message:** `Circuit breaker open, failing fast`  
+**Recovery:** Wait for reset timeout, then retry. If persistent, investigate underlying dependency.
+
+```rust
+#[error("FG-SYS-E001: Circuit breaker open, failing fast")]
+CircuitOpen
+```
+
+**Retryable:** Yes (after reset_timeout elapses)
+
+### FG-SYS-E002: Internal Error
+
+**Cause:** Unexpected internal state or bug  
+**Detection:** Assertion failure or unexpected condition  
+**User Message:** `Internal error: {message}`  
+**Recovery:** Report bug with context. May require service restart.
+
+```rust
+#[error("FG-SYS-E002: Internal error: {message}")]
+Internal { message: String }
+```
+
+---
+
+## 15. Error Handling Patterns
+
+### 15.1 Rust Error Propagation
 
 ```rust
 use thiserror::Error;
@@ -486,7 +516,7 @@ impl GraphError {
 }
 ```
 
-### 14.2 Graceful Degradation
+### 15.2 Graceful Degradation
 
 ```rust
 impl CsrGraph {
@@ -513,69 +543,78 @@ impl CsrGraph {
 }
 ```
 
-### 14.3 Circuit Breaker
+### 15.3 Circuit Breaker
+
+The circuit breaker pattern prevents cascading failures when external dependencies become unavailable.
 
 ```rust
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::time::Duration;
+
+/// Circuit breaker states.
+pub enum CircuitState {
+    Closed = 0,   // Normal operation
+    Open = 1,     // Failing fast
+    HalfOpen = 2, // Testing recovery
+}
+
+/// Configuration for circuit breaker behavior.
+pub struct CircuitBreakerConfig {
+    pub failure_threshold: u64,    // Default: 5
+    pub reset_timeout: Duration,   // Default: 30 seconds
+    pub success_threshold: u64,    // Default: 2
+}
+
+/// Thread-safe circuit breaker using atomic operations.
 pub struct CircuitBreaker {
-    failure_count: AtomicU32,
-    last_failure: AtomicU64,
-    state: AtomicU8, // 0=Closed, 1=Open, 2=HalfOpen
+    config: CircuitBreakerConfig,
+    state: AtomicU8,
+    failure_count: AtomicU64,
+    success_count: AtomicU64,
+    last_failure_time: AtomicU64,
 }
 
 impl CircuitBreaker {
-    const FAILURE_THRESHOLD: u32 = 5;
-    const RESET_TIMEOUT_MS: u64 = 30_000;
+    /// Check if request should proceed.
+    /// Returns Ok(()) or Err(GraphError::CircuitOpen).
+    pub fn check(&self) -> Result<()>;
     
-    pub fn call<T, E>(&self, f: impl FnOnce() -> Result<T, E>) -> Result<T, GraphError> {
-        match self.state.load(Ordering::Acquire) {
-            0 => { // Closed - normal operation
-                match f() {
-                    Ok(v) => {
-                        self.failure_count.store(0, Ordering::Release);
-                        Ok(v)
-                    }
-                    Err(_) => {
-                        if self.failure_count.fetch_add(1, Ordering::AcqRel) >= Self::FAILURE_THRESHOLD {
-                            self.state.store(1, Ordering::Release);
-                            self.last_failure.store(now_ms(), Ordering::Release);
-                        }
-                        Err(GraphError::CircuitOpen)
-                    }
-                }
-            }
-            1 => { // Open - fail fast
-                if now_ms() - self.last_failure.load(Ordering::Acquire) > Self::RESET_TIMEOUT_MS {
-                    self.state.store(2, Ordering::Release);
-                    self.call(f) // Try half-open
-                } else {
-                    Err(GraphError::CircuitOpen)
-                }
-            }
-            2 => { // Half-open - test
-                match f() {
-                    Ok(v) => {
-                        self.state.store(0, Ordering::Release);
-                        self.failure_count.store(0, Ordering::Release);
-                        Ok(v)
-                    }
-                    Err(_) => {
-                        self.state.store(1, Ordering::Release);
-                        self.last_failure.store(now_ms(), Ordering::Release);
-                        Err(GraphError::CircuitOpen)
-                    }
-                }
-            }
-            _ => unreachable!()
-        }
+    /// Record a successful operation (resets failure count).
+    pub fn record_success(&self);
+    
+    /// Record a failed operation (may trip circuit).
+    pub fn record_failure(&self);
+    
+    /// Reset circuit to closed state.
+    pub fn reset(&self);
+}
+```
+
+**Usage Pattern:**
+
+```rust
+let cb = CircuitBreaker::with_defaults();
+
+// Before calling external dependency
+cb.check()?;
+
+match external_call() {
+    Ok(result) => {
+        cb.record_success();
+        Ok(result)
+    }
+    Err(e) => {
+        cb.record_failure();
+        Err(e)
     }
 }
 ```
 
 ---
 
-## 15. Logging & Alerting
+## 16. Logging & Alerting
 
-### 15.1 Structured Logging
+### 16.1 Structured Logging
 
 ```rust
 use tracing::{error, warn, info, instrument};
@@ -592,7 +631,7 @@ pub fn traverse(graph: &CsrGraph, start: NodeId, max_depth: u32) -> Result<Trave
 }
 ```
 
-### 15.2 Alert Rules
+### 16.2 Alert Rules
 
 ```yaml
 # alertmanager/rules/fusiongraph.yml
@@ -625,9 +664,9 @@ groups:
 
 ---
 
-## 16. Recovery Procedures
+## 17. Recovery Procedures
 
-### 16.1 CSR Corruption Recovery
+### 17.1 CSR Corruption Recovery
 
 ```bash
 #!/bin/bash
@@ -655,7 +694,7 @@ fusiongraph-cli verify --checksums
 fusiongraph-cli resume
 ```
 
-### 16.2 Delta Layer Recovery
+### 17.2 Delta Layer Recovery
 
 ```bash
 #!/bin/bash
@@ -675,7 +714,7 @@ fi
 
 ---
 
-## 17. Error Metrics
+## 18. Error Metrics
 
 ```rust
 use prometheus::{IntCounterVec, register_int_counter_vec};
