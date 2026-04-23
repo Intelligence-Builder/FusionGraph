@@ -611,6 +611,17 @@ mod tests {
     }
 
     #[test]
+    fn shard_to_global_returns_none_for_invalid_offset() {
+        let graph = CsrBuilder::new()
+            .with_edges([(0, 1), (1, 2)])
+            .build()
+            .unwrap();
+        let shard = &graph.shards()[0];
+
+        assert!(graph.shard_to_global(0, shard.node_count()).is_none());
+    }
+
+    #[test]
     fn weighted_graph_shard_partitioning() {
         // Test that weighted graphs partition correctly
         let edges: Vec<(u64, u64, f32)> = (0_u16..50)
