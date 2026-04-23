@@ -451,12 +451,7 @@ mod tests {
             let node = NodeId::new(node_id);
             if let Some((shard_idx, offset)) = graph.global_to_shard(node) {
                 let recovered = graph.shard_to_global(shard_idx, offset);
-                assert_eq!(
-                    recovered,
-                    Some(node),
-                    "Roundtrip failed for node {}",
-                    node_id
-                );
+                assert_eq!(recovered, Some(node), "Roundtrip failed for node {node_id}");
             }
         }
     }
@@ -478,8 +473,7 @@ mod tests {
             let result = graph.global_to_shard(node);
             assert!(
                 result.is_some(),
-                "global_to_shard failed for node {}",
-                node_id
+                "global_to_shard failed for node {node_id}"
             );
 
             let (shard_idx, offset) = result.unwrap();
@@ -487,10 +481,7 @@ mod tests {
             assert_eq!(
                 recovered,
                 Some(node),
-                "Roundtrip failed for node {} (shard={}, offset={})",
-                node_id,
-                shard_idx,
-                offset
+                "Roundtrip failed for node {node_id} (shard={shard_idx}, offset={offset})"
             );
         }
     }
@@ -556,8 +547,7 @@ mod tests {
                 // Range should start where previous ended
                 assert_eq!(
                     range.start, covered_nodes,
-                    "Gap in shard coverage at shard {}",
-                    shard_idx
+                    "Gap in shard coverage at shard {shard_idx}"
                 );
 
                 covered_nodes = range.end;

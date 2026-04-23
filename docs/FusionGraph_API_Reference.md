@@ -775,20 +775,22 @@ pub enum GraphError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Circuit breaker open, failing fast")]
+    #[error("FG-SYS-E001: Circuit breaker open, failing fast")]
     CircuitOpen,
 
-    #[error("Internal error: {0}")]
-    Internal(String),
+    #[error("FG-SYS-E002: Internal error: {message}")]
+    Internal { message: String },
 }
 ```
 
 ### 8.1 Circuit Breaker
 
 Thread-safe circuit breaker for protecting against external dependency failures.
+Implemented in `fusiongraph_core::circuit_breaker`.
 
 ```rust
 use std::time::Duration;
+use fusiongraph_core::error::GraphError;
 
 /// Circuit breaker states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
