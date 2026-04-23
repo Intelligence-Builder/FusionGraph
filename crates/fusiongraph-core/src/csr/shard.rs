@@ -13,8 +13,8 @@ pub struct CsrShard {
     id: u32,
     /// Range of global node IDs covered by this shard.
     node_range: Range<usize>,
-    /// CSR row pointers (offsets into col_indices for each node).
-    /// Length: node_count + 1
+    /// CSR row pointers (offsets into `col_indices` for each node).
+    /// Length: `node_count` + 1.
     row_ptrs: Arc<[u32]>,
     /// CSR column indices (target node IDs).
     col_indices: Arc<[u32]>,
@@ -86,7 +86,7 @@ impl CsrShard {
         end - start
     }
 
-    /// Returns the range of indices in col_indices for a node's neighbors.
+    /// Returns the range of indices in `col_indices` for a node's neighbors.
     #[inline]
     pub fn neighbor_range(&self, local_offset: usize) -> (usize, usize) {
         if local_offset >= self.node_count() {
@@ -116,8 +116,7 @@ impl CsrShard {
         let weights_size = self
             .weights
             .as_ref()
-            .map(|w| w.len() * std::mem::size_of::<f32>())
-            .unwrap_or(0);
+            .map_or(0, |w| w.len() * std::mem::size_of::<f32>());
 
         row_ptrs_size + col_indices_size + weights_size + std::mem::size_of::<Self>()
     }
