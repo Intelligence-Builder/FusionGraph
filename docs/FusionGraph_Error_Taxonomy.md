@@ -420,7 +420,7 @@ CsrCorruption { shard_id: u32, expected: u64, actual: u64 }
 
 **Cause:** Cannot write to audit/access history  
 **Detection:** Audit write failure  
-**User Message:** `Warning: Audit logging failed, operation blocked`  
+**User Message:** `Error: Audit logging failed; operation blocked`  
 **Recovery:** Fix audit infrastructure before proceeding
 
 ---

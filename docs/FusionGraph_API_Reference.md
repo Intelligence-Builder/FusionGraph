@@ -83,6 +83,15 @@ pub struct Ontology {
 }
 
 #[derive(Debug, Clone)]
+pub struct ComputedProperty {
+    pub name: String,
+    pub expression: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub metadata: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct OntologySettings {
     pub default_node_id_type: IdType,
     pub edge_direction: EdgeDirection,

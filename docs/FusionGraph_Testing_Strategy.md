@@ -853,13 +853,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --test '*'
+      - run: cargo test --tests
 
   integration:
     runs-on: ubuntu-latest
     services:
       minio:
         image: minio/minio
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          server /data
         ports:
           - 9000:9000
     steps:
@@ -874,7 +879,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
-      - run: cargo miri test --lib ffi
+      - run: cargo miri test --lib -- ffi
 
   coverage:
     runs-on: ubuntu-latest
