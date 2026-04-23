@@ -223,12 +223,12 @@ mod proptest_tests {
         }
 
         #[test]
-        fn invalid_toml_does_not_panic(s in ".*") {
+        fn invalid_toml_does_not_panic(s in ".{0,256}") {
             let _ = parse_toml(&s);
         }
 
         #[test]
-        fn invalid_json_does_not_panic(s in ".*") {
+        fn invalid_json_does_not_panic(s in ".{0,256}") {
             let _ = parse_json(&s);
         }
     }
