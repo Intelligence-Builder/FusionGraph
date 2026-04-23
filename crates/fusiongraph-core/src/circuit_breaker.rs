@@ -64,6 +64,19 @@ pub struct CircuitBreaker {
 }
 
 impl CircuitBreaker {
+    #[allow(clippy::cast_possible_truncation)]
+    fn now_millis() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    const fn reset_timeout_millis(&self) -> u64 {
+        self.config.reset_timeout.as_millis() as u64
+    }
+
     /// Creates a new circuit breaker with the given configuration.
     #[must_use]
     #[allow(clippy::missing_const_for_fn)] // Atomic::new is not const fn
@@ -104,21 +117,29 @@ impl CircuitBreaker {
             CircuitState::Open => {
                 // Check if reset timeout has elapsed
                 let last_failure = self.last_failure_time.load(Ordering::SeqCst);
-                #[allow(clippy::cast_possible_truncation)]
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
+                let now = Self::now_millis();
                 let elapsed = now.saturating_sub(last_failure);
 
-                #[allow(clippy::cast_possible_truncation)]
-                let timeout_ms = self.config.reset_timeout.as_millis() as u64;
+                let timeout_ms = self.reset_timeout_millis();
                 if elapsed >= timeout_ms {
-                    // Transition to half-open
-                    self.state
-                        .store(CircuitState::HalfOpen as u8, Ordering::SeqCst);
-                    self.success_count.store(0, Ordering::SeqCst);
-                    Ok(())
+                    // Transition to half-open exactly once. Only the winning
+                    // thread resets success_count, so concurrent checks cannot
+                    // erase successes that have already been recorded.
+                    match self.state.compare_exchange(
+                        CircuitState::Open as u8,
+                        CircuitState::HalfOpen as u8,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => {
+                            self.success_count.store(0, Ordering::SeqCst);
+                            Ok(())
+                        }
+                        Err(actual) => match CircuitState::from(actual) {
+                            CircuitState::Closed | CircuitState::HalfOpen => Ok(()),
+                            CircuitState::Open => Err(GraphError::CircuitOpen),
+                        },
+                    }
                 } else {
                     Err(GraphError::CircuitOpen)
                 }
@@ -148,22 +169,21 @@ impl CircuitBreaker {
 
     /// Records a failed operation.
     pub fn record_failure(&self) {
-        let failures = self.failure_count.fetch_add(1, Ordering::SeqCst) + 1;
-        #[allow(clippy::cast_possible_truncation)]
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        self.last_failure_time.store(now_ms, Ordering::SeqCst);
-
         match self.state() {
             CircuitState::Closed => {
+                let failures = self.failure_count.fetch_add(1, Ordering::SeqCst) + 1;
+                self.last_failure_time
+                    .store(Self::now_millis(), Ordering::SeqCst);
                 if failures >= self.config.failure_threshold {
                     self.state.store(CircuitState::Open as u8, Ordering::SeqCst);
                 }
             }
             CircuitState::HalfOpen => {
                 // Any failure in half-open state opens the circuit
+                self.success_count.store(0, Ordering::SeqCst);
+                self.failure_count.fetch_add(1, Ordering::SeqCst);
+                self.last_failure_time
+                    .store(Self::now_millis(), Ordering::SeqCst);
                 self.state.store(CircuitState::Open as u8, Ordering::SeqCst);
             }
             CircuitState::Open => {}
@@ -257,10 +277,8 @@ mod tests {
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
 
-        // Simulate timeout by manually transitioning
-        cb.state
-            .store(CircuitState::HalfOpen as u8, Ordering::SeqCst);
-        cb.success_count.store(0, Ordering::SeqCst);
+        assert!(cb.check().is_ok());
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
 
         cb.record_success();
         assert_eq!(cb.state(), CircuitState::HalfOpen);
@@ -277,6 +295,24 @@ mod tests {
 
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
+    }
+
+    #[test]
+    fn open_failures_do_not_extend_reset_timeout() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            ..Default::default()
+        };
+        let cb = CircuitBreaker::new(config);
+
+        cb.record_failure();
+        let opened_at = cb.last_failure_time.load(Ordering::SeqCst);
+        let failures = cb.failure_count();
+
+        cb.record_failure();
+
+        assert_eq!(cb.failure_count(), failures);
+        assert_eq!(cb.last_failure_time.load(Ordering::SeqCst), opened_at);
     }
 
     #[test]

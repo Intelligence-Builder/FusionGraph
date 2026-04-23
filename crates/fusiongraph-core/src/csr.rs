@@ -86,8 +86,9 @@ impl CsrGraph {
     }
 
     /// Returns a reference to the shards.
+    #[cfg(test)]
     #[inline]
-    pub fn shards(&self) -> &[Arc<CsrShard>] {
+    pub(crate) fn shards(&self) -> &[Arc<CsrShard>] {
         &self.shards
     }
 

@@ -25,5 +25,5 @@ The circuit breaker currently tracks time using wall-clock milliseconds and atom
 
 ## Test Results
 - `CARGO_TARGET_DIR=/tmp/fusiongraph-qa/target ./scripts/workteam.sh --mode qa --issue 11 --focus-path crates/fusiongraph-core --focus-path crates/fusiongraph-datafusion`: passed on 2026-04-23.
-- Unit tests passed: `52` core and `29` datafusion tests.
+- Unit tests passed: `53` core and `29` datafusion tests.
 - Clippy passed with no warnings; formatting passed.
