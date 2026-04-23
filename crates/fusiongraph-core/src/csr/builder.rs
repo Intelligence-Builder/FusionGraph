@@ -8,6 +8,8 @@ use crate::types::NodeId;
 
 use super::{CsrGraph, CsrShard, DEFAULT_SHARD_SIZE};
 
+type CsrArrays = (Vec<u32>, Vec<u32>, Option<Vec<f32>>);
+
 /// Configuration for CSR building.
 #[derive(Debug, Clone)]
 pub struct CsrBuildConfig {
@@ -67,6 +69,12 @@ impl CsrBuilder {
     }
 
     /// Builds the CSR graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GraphError::InvalidEdge`] when an edge endpoint exceeds the
+    /// supported `u32` node range and [`GraphError::UnsupportedGraphSize`]
+    /// when the graph exceeds this implementation's CSR capacity limits.
     pub fn build(mut self) -> Result<CsrGraph> {
         if self.edges.is_empty() {
             return Ok(CsrGraph::empty());
@@ -117,12 +125,8 @@ impl CsrBuilder {
         let (row_ptrs, col_indices, weights) = self.build_csr_arrays(node_count)?;
 
         // Partition into shards based on configured shard_size
-        let shards = self.partition_into_shards(
-            node_count,
-            &row_ptrs,
-            &col_indices,
-            weights.as_deref(),
-        )?;
+        let shards =
+            self.partition_into_shards(node_count, &row_ptrs, &col_indices, weights.as_deref())?;
 
         Ok(CsrGraph {
             shards,
@@ -133,14 +137,11 @@ impl CsrBuilder {
     }
 
     /// Builds the raw CSR arrays.
-    fn build_csr_arrays(
-        &self,
-        node_count: usize,
-    ) -> Result<(Vec<u32>, Vec<u32>, Option<Vec<f32>>)> {
+    fn build_csr_arrays(&self, node_count: usize) -> Result<CsrArrays> {
         // Count edges per node
         let mut degrees = vec![0u32; node_count];
         for &(src, _) in &self.edges {
-            let src_idx = self.edge_src_index(src, node_count)?;
+            let src_idx = Self::edge_src_index(src, node_count)?;
             let degree = degrees
                 .get_mut(src_idx)
                 .ok_or_else(|| GraphError::InvalidEdge {
@@ -180,7 +181,7 @@ impl CsrBuilder {
         let mut current_pos = row_ptrs[..node_count].to_vec();
 
         for (i, &(src, dst)) in self.edges.iter().enumerate() {
-            let src_idx = self.edge_src_index(src, node_count)?;
+            let src_idx = Self::edge_src_index(src, node_count)?;
             let pos = current_pos[src_idx] as usize;
             col_indices[pos] = u32::try_from(dst).map_err(|_| GraphError::InvalidEdge {
                 from: NodeId::new(src),
@@ -220,22 +221,13 @@ impl CsrBuilder {
         let row_ptr_size = std::mem::size_of::<u32>();
 
         // Estimate nodes per shard based on average degree
-        let total_edges = col_indices.len();
-        let avg_edges_per_node = if node_count > 0 {
-            total_edges as f64 / node_count as f64
-        } else {
-            0.0
-        };
-        let avg_bytes_per_node =
-            row_ptr_size as f64 + avg_edges_per_node * bytes_per_edge as f64;
+        let total_edge_bytes = col_indices.len().saturating_mul(bytes_per_edge);
+        let total_row_bytes = (node_count + 1).saturating_mul(row_ptr_size);
+        let total_bytes = total_row_bytes.saturating_add(total_edge_bytes);
+        let avg_bytes_per_node = total_bytes.div_ceil(node_count).max(1);
 
-        // Target nodes per shard (at least 1 node per shard)
-        let target_nodes_per_shard = if avg_bytes_per_node > 0.0 {
-            (self.config.shard_size as f64 / avg_bytes_per_node).ceil() as usize
-        } else {
-            node_count
-        }
-        .max(1);
+        // Target nodes per shard (at least 1 node per shard).
+        let target_nodes_per_shard = self.config.shard_size.div_ceil(avg_bytes_per_node).max(1);
 
         let mut shards = Vec::new();
         let mut start_node = 0usize;
@@ -247,21 +239,23 @@ impl CsrBuilder {
 
             // Adjust based on actual memory usage to stay close to shard_size
             let mut shard_bytes =
-                self.calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
+                Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
 
             // If we're over the shard size and have more than 1 node, shrink
             while shard_bytes > self.config.shard_size && end_node > start_node + 1 {
                 end_node -= 1;
                 shard_bytes =
-                    self.calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
+                    Self::calculate_shard_memory(start_node, end_node, row_ptrs, bytes_per_edge);
             }
 
             // Extract shard data
             let shard_node_count = end_node - start_node;
 
             // Build shard row pointers (relative to shard start)
-            let shard_edge_start = row_ptrs[start_node] as usize;
-            let shard_edge_end = row_ptrs[end_node] as usize;
+            let shard_edge_start =
+                usize::try_from(row_ptrs[start_node]).expect("u32 row pointer fits usize");
+            let shard_edge_end =
+                usize::try_from(row_ptrs[end_node]).expect("u32 row pointer fits usize");
 
             let mut shard_row_ptrs = Vec::with_capacity(shard_node_count + 1);
             for i in start_node..=end_node {
@@ -287,11 +281,11 @@ impl CsrBuilder {
             shards.push(Arc::new(shard));
 
             start_node = end_node;
-            shard_id = shard_id.checked_add(1).ok_or_else(|| {
-                GraphError::UnsupportedGraphSize {
+            shard_id = shard_id
+                .checked_add(1)
+                .ok_or_else(|| GraphError::UnsupportedGraphSize {
                     reason: "shard count exceeds u32::MAX".to_string(),
-                }
-            })?;
+                })?;
         }
 
         Ok(shards)
@@ -299,15 +293,14 @@ impl CsrBuilder {
 
     /// Calculates the memory usage for a potential shard.
     fn calculate_shard_memory(
-        &self,
         start_node: usize,
         end_node: usize,
         row_ptrs: &[u32],
         bytes_per_edge: usize,
     ) -> usize {
         let node_count = end_node - start_node;
-        let edge_start = row_ptrs[start_node] as usize;
-        let edge_end = row_ptrs[end_node] as usize;
+        let edge_start = usize::try_from(row_ptrs[start_node]).expect("u32 row pointer fits usize");
+        let edge_end = usize::try_from(row_ptrs[end_node]).expect("u32 row pointer fits usize");
         let edge_count = edge_end - edge_start;
 
         // row_ptrs: (node_count + 1) * 4 bytes
@@ -328,7 +321,7 @@ impl CsrBuilder {
         Ok(())
     }
 
-    fn edge_src_index(&self, src: u64, node_count: usize) -> Result<usize> {
+    fn edge_src_index(src: u64, node_count: usize) -> Result<usize> {
         let src_idx = usize::try_from(src).map_err(|_| GraphError::InvalidEdge {
             from: NodeId::new(src),
             to: NodeId::new(src),
@@ -614,7 +607,9 @@ mod tests {
     #[test]
     fn weighted_graph_shard_partitioning() {
         // Test that weighted graphs partition correctly
-        let edges: Vec<(u64, u64, f32)> = (0..50).map(|i| (i, i + 1, i as f32 * 0.1)).collect();
+        let edges: Vec<(u64, u64, f32)> = (0_u16..50)
+            .map(|i| (u64::from(i), u64::from(i + 1), f32::from(i) * 0.1))
+            .collect();
 
         let graph = CsrBuilder::new()
             .with_shard_size(128)
