@@ -1,6 +1,6 @@
 //! `GraphTableProvider` implementation.
 //!
-//! This module provides the `GraphTableProvider` struct that extends DataFusion's
+//! This module provides the `GraphTableProvider` struct that extends `DataFusion`'s
 //! `TableProvider` for graph-aware table access. While the API reference describes
 //! a trait-based design, the current implementation uses a concrete struct with
 //! inherent methods for simplicity and performance.
@@ -93,8 +93,7 @@ impl GraphTableProvider {
         let id_type = match self.ontology.settings.default_node_id_type {
             IdType::U32 => DataType::UInt32,
             IdType::U64 => DataType::UInt64,
-            IdType::U128 => DataType::Utf8, // U128 represented as string
-            IdType::String => DataType::Utf8,
+            IdType::U128 | IdType::String => DataType::Utf8,
         };
 
         let mut fields = vec![Field::new("node_id", id_type, false)];
@@ -119,8 +118,7 @@ impl GraphTableProvider {
         let id_type = match self.ontology.settings.default_node_id_type {
             IdType::U32 => DataType::UInt32,
             IdType::U64 => DataType::UInt64,
-            IdType::U128 => DataType::Utf8,
-            IdType::String => DataType::Utf8,
+            IdType::U128 | IdType::String => DataType::Utf8,
         };
 
         let mut fields = vec![
@@ -151,6 +149,7 @@ impl GraphTableProvider {
     /// # Errors
     ///
     /// Returns an error if the CSR build fails.
+    #[allow(clippy::unused_async)]
     pub async fn materialize(
         &mut self,
         _state: &dyn Session,
@@ -169,6 +168,7 @@ impl GraphTableProvider {
     /// # Errors
     ///
     /// Returns an error if the graph is not materialized or plan creation fails.
+    #[allow(clippy::unused_async)]
     pub async fn create_traversal_plan(
         &self,
         _state: &dyn Session,
@@ -269,7 +269,9 @@ properties = ["since"]
     fn node_schema_returns_correct_fields() {
         let provider = GraphTableProvider::new(test_ontology(), test_schema());
 
-        let schema = provider.node_schema("User").expect("User schema should exist");
+        let schema = provider
+            .node_schema("User")
+            .expect("User schema should exist");
         assert!(schema.field_with_name("node_id").is_ok());
         assert!(schema.field_with_name("label").is_ok());
         assert!(schema.field_with_name("name").is_ok());
@@ -307,7 +309,7 @@ properties = ["since"]
     async fn create_traversal_plan_requires_materialization() {
         let provider = GraphTableProvider::new(test_ontology(), test_schema());
         let spec = TraversalSpec {
-            start: vec![1],
+            start: vec![fusiongraph_core::NodeId::new(1)],
             max_depth: 3,
             max_nodes: None,
             algorithm: TraversalAlgorithm::Bfs,
