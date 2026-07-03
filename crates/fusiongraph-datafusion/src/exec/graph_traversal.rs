@@ -1,7 +1,6 @@
 //! `GraphTraversalExec` - Physical operator for graph traversals.
 
 use std::any::Any;
-use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 
@@ -97,51 +96,23 @@ impl GraphTraversalExec {
         Ok(())
     }
 
+    /// Runs the traversal through the core BFS kernel (SIMD fast path when
+    /// the delta layer is empty) and returns Arrow-ready column vectors.
     fn collect_bfs_rows(&self, max_nodes: usize) -> (Vec<u64>, Vec<u32>) {
         if max_nodes == 0 {
             return (Vec::new(), Vec::new());
         }
 
-        let mut visited_set: HashSet<_> = HashSet::new();
-        let mut queue: VecDeque<_> = VecDeque::new();
+        let bounded = (max_nodes != usize::MAX).then_some(max_nodes);
+        let result = fusiongraph_core::traversal::bfs_bounded(
+            &self.graph,
+            &self.spec.start,
+            self.spec.max_depth,
+            bounded,
+        );
 
-        for &start in &self.spec.start {
-            if visited_set.len() >= max_nodes {
-                break;
-            }
-
-            if self.graph.contains(start) && visited_set.insert(start) {
-                queue.push_back((start, 0_u32));
-            }
-        }
-
-        let mut node_ids = Vec::with_capacity(visited_set.len().min(max_nodes));
-        let mut depths = Vec::with_capacity(visited_set.len().min(max_nodes));
-
-        while let Some((node, depth)) = queue.pop_front() {
-            if node_ids.len() >= max_nodes {
-                break;
-            }
-
-            node_ids.push(node.as_u64());
-            depths.push(depth);
-
-            if depth >= self.spec.max_depth {
-                continue;
-            }
-
-            for neighbor in self.graph.neighbors(node) {
-                if visited_set.len() >= max_nodes {
-                    break;
-                }
-
-                if visited_set.insert(neighbor) {
-                    queue.push_back((neighbor, depth + 1));
-                }
-            }
-        }
-
-        (node_ids, depths)
+        let node_ids = result.visited.iter().map(|n| n.as_u64()).collect();
+        (node_ids, result.depths)
     }
 }
 

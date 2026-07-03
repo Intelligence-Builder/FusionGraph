@@ -73,7 +73,11 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
 - [x] 10M-edge scale (1.25M nodes × d8, uniform random): operator path beats
       chained-join SQL by ~617x (3-hop) / ~1,340x (2-hop); Parquet → CSR
       projection = 208 ms, amortizes in ~4 SQL queries. Results in README.
-- [ ] 100M-edge scale + skewed-degree (R-MAT/LDBC-style) graph generator
+- [x] Skewed-degree generator (2026-07-03): `fusiongraph_core::gen::rmat`
+      with Graph500 parameters (a,b,c,d = 0.57/0.19/0.19/0.05), seeded and
+      dependency-free; `gen::uniform` for the baseline shape.
+- [x] 100M-edge tier (R-MAT scale 23 × ef 12), opt-in via `FG_BENCH_LARGE=1`:
+      near-full-graph BFS in 416 ms (~240M edges/sec examined).
 - [ ] Comparison targets: DataFusion recursive CTE (when available);
       stretch: DuckPGQ on the same Parquet files
 
@@ -117,14 +121,39 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
 - [x] Hermetic e2e test infra: minimal in-memory Iceberg catalog
       (`tests/memory_catalog/`) with a working `update_table` — upstream's
       0.5.1-era memory catalog lacked commit support and is yanked anyway.
-- [ ] Iceberg benchmark tier (M1-style numbers on Iceberg-backed edges)
-- [ ] REST / Glue catalog usage example (production catalog wiring)
+- [x] Iceberg benchmark tier (2026-07-03, `--bench iceberg_e2e`): 10M-edge
+      Iceberg-backed projection = 174 ms (vs. 204 ms Parquet); SQL joins on
+      the Iceberg provider are ~8x slower than raw Parquet (91.9/220 ms),
+      which widens the kernel's advantage to ~17,700x (3-hop via operator).
+- [x] Runnable Iceberg example (`--example iceberg_graph`): snapshot-pinned
+      audit scenario; REST (Polaris/Lakekeeper/Unity) and Glue catalog wiring
+      documented in the example header — swapping the catalog changes nothing
+      downstream because the integration only needs an `iceberg::table::Table`.
 
-### M4 — Performance depth (only after M1 profiling)
-- [ ] NEON implementation of `filter_unvisited` / `set_visited_batch`
-- [ ] AVX2 implementation (CI runner or cloud box for validation)
-- [ ] Direction-optimizing BFS (top-down/bottom-up switching)
-- [ ] Delta-layer-aware traversal benchmarks under concurrent mutation
+### M4 — Performance depth (core done 2026-07-03; profile-guided)
+- [x] **BFS hot-path rewrite** — the profile said the wins were structural,
+      not SIMD: dense `u64` bitset visited tracking (was `HashSet<NodeId>`),
+      zero-copy `&[u32]` neighbor slices from CSR storage (was an allocating
+      per-node iterator), allocation-free batch filtering. Result: 3-hop BFS
+      at 10M edges **91 µs → 6.8 µs (~13x)**; `GraphTraversalExec` now calls
+      the shared kernel (its private HashSet BFS is gone).
+- [x] `bfs_bounded` kernel API (multi-start + `max_nodes` cap) shared by the
+      operator; `bfs_bounded_with_backend` for backend benchmarking.
+- [x] NEON implementation of `filter_unvisited` (real intrinsics,
+      equivalence-tested against scalar). **Honest finding:** ~5% slower
+      than the optimized scalar kernel on Apple Silicon — the operation is
+      gather-bound and NEON has no gather — so `select_backend()` returns
+      scalar on `aarch64`. Backend stays available for other ARM cores.
+- [x] AVX2 implementation (gather + variable shifts + movemask); compiles
+      and dispatches behind runtime detection, delegated to by the AVX-512
+      slot. Needs validation/benchmarking on x86_64 hardware (CI item).
+- [x] Delta-layer traversal benchmark: clean fast path 4.9 µs vs. 361 µs
+      with 1k delta insertions + 100 tombstones (~74x) — motivates
+      compaction (below).
+- [ ] Direction-optimizing BFS (top-down/bottom-up switching) — requires a
+      CSR transpose (incoming-edge index)
+- [ ] Delta → base compaction to bound the slow-path penalty
+- [ ] AVX2/AVX-512 numbers from an x86_64 CI runner
 
 ## 4. Explicitly Deferred (kill list until further notice)
 

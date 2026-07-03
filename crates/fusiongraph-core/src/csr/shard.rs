@@ -97,6 +97,17 @@ impl CsrShard {
         (start, end)
     }
 
+    /// Returns the neighbor IDs of a node as a contiguous slice.
+    ///
+    /// Zero-copy view into the CSR column-index array; feeds SIMD batch
+    /// filters directly without per-neighbor iteration.
+    #[inline]
+    #[must_use]
+    pub fn neighbor_slice(&self, local_offset: usize) -> &[u32] {
+        let (start, end) = self.neighbor_range(local_offset);
+        &self.col_indices[start..end]
+    }
+
     /// Returns the column index (target node ID) at the given position.
     #[inline]
     pub fn col_index(&self, idx: usize) -> Option<u32> {

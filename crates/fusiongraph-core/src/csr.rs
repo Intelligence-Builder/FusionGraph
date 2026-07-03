@@ -149,6 +149,24 @@ impl CsrGraph {
         }
     }
 
+    /// Returns the base-layer neighbors of a node as a contiguous slice of
+    /// dense `u32` IDs (zero-copy view into CSR storage).
+    ///
+    /// Excludes delta-layer insertions and does **not** apply delta
+    /// tombstones; callers on the traversal fast path must check
+    /// [`DeltaLayer::is_empty`] first (see [`Self::delta`]).
+    #[inline]
+    #[must_use]
+    pub fn base_neighbor_slice(&self, node: NodeId) -> &[u32] {
+        self.global_to_shard(node)
+            .and_then(|(shard_idx, offset)| {
+                self.shards
+                    .get(shard_idx)
+                    .map(|shard| shard.neighbor_slice(offset))
+            })
+            .unwrap_or(&[])
+    }
+
     /// Returns an iterator over base layer neighbors only.
     fn base_neighbors(&self, node: NodeId) -> BaseNeighborIter<'_> {
         self.global_to_shard(node)

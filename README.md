@@ -94,23 +94,35 @@ One-time CSR projection cost: 365 µs (80k edges), 3.65 ms (800k edges) — i.e.
 building the graph pays for itself within a **single** 3-hop query at 800k-edge
 scale. Both paths are sanity-checked to agree on the reachable-set size.
 
-### End-to-end on Parquet, 10M edges (M1)
+### End-to-end on Parquet and Iceberg, 10M edges (post-M4 kernel)
 
-1.25M nodes × out-degree 8 = 10M edges stored in Parquet. The zero-ETL
-pipeline exercises the real operators: `ParquetExec` scan →
-`CoalescePartitionsExec` → `CSRBuilderExec` (graph captured via `GraphSink`)
-→ `GraphTraversalExec`. `cargo bench -p fusiongraph-datafusion --bench parquet_e2e`:
+1.25M nodes × out-degree 8 = 10M edges. The zero-ETL pipeline exercises the
+real operators: table scan → `CoalescePartitionsExec` → `CSRBuilderExec`
+(graph captured via `GraphSink`) → `GraphTraversalExec`. DataFusion 47:
 
 | Path | 2-hop | 3-hop |
 |---|---:|---:|
-| CSR BFS (kernel) | 12.3 µs | 91.4 µs |
-| `GraphTraversalExec` (operator, incl. Arrow output) | 17.2 µs | 96.5 µs |
-| DataFusion SQL (chained joins on Parquet) | 23.0 ms | 59.5 ms |
-| **Speedup (operator vs. SQL)** | **~1,340x** | **~617x** |
+| CSR BFS (kernel) | 2.5 µs | 6.8 µs |
+| `GraphTraversalExec` (operator, incl. Arrow output) | 7.9 µs | 12.4 µs |
+| DataFusion SQL, chained joins on **Parquet** | 10.7 ms | 27.2 ms |
+| DataFusion SQL, chained joins on **Iceberg** | 91.9 ms | 220 ms |
+| **Speedup (operator vs. Parquet SQL)** | **~1,350x** | **~2,190x** |
 
-One-time Parquet → CSR projection: **208 ms** for all 10M edges — it pays for
-itself after ~4 SQL 3-hop queries. Operator overhead vs. the raw kernel is
-~5 µs per traversal (Arrow result materialization).
+One-time projection of all 10M edges: **204 ms** from Parquet, **174 ms**
+from Iceberg — it pays for itself in a handful of SQL queries. At 100M edges
+(R-MAT, skewed degrees), a near-full-graph BFS completes in **416 ms**
+(~240M edges/sec examined); run it with
+`FG_BENCH_LARGE=1 cargo bench -p fusiongraph-core`.
+
+### M4 kernel notes (profile-guided)
+
+The M4 traversal rewrite (dense visited bitset + zero-copy `&[u32]` neighbor
+slices + allocation-free batch filtering) made 3-hop BFS **~13x faster**
+(91 µs → 6.8 µs at 10M edges). One honest negative result: hand-written NEON
+intrinsics measured **~5% slower** than the optimized scalar kernel on Apple
+Silicon — the filter is gather-bound and NEON has no gather instruction — so
+`select_backend()` returns scalar on `aarch64` and the NEON/AVX2 backends
+remain available for explicit use and re-evaluation on other hardware.
 
 ```rust
 use fusiongraph_core::{CsrGraph, NodeId, traversal::bfs};
@@ -178,7 +190,11 @@ Honest inventory, updated 2026-07.
 
 ### Works today
 - ✅ CSR storage with micro-sharding (`fusiongraph-core`)
-- ✅ BFS traversal with depth tracking and level extraction
+- ✅ BFS traversal with depth tracking and level extraction — M4 kernel:
+  dense bitset visited tracking, zero-copy neighbor slices, SIMD backend
+  dispatch (scalar/NEON/AVX2, equivalence-tested), delta-aware slow path
+- ✅ Deterministic graph generators (`gen::uniform`, `gen::rmat` with
+  Graph500 parameters) for reproducible benchmarks
 - ✅ Lock-free delta layer for edge insertions/tombstones (DashMap)
 - ✅ Ontology schema parser + validation (TOML/JSON)
 - ✅ `GraphTableProvider`, `CSRBuilderExec`, `GraphTraversalExec` DataFusion operators
@@ -196,9 +212,16 @@ Honest inventory, updated 2026-07.
   pruning included) and project them into graphs — with **snapshot-pinned,
   reproducible graph builds** (`register_iceberg_table_snapshot`)
 
+- ✅ R-MAT skewed-degree benchmarks incl. opt-in 100M-edge tier
+  (`FG_BENCH_LARGE=1`)
+- ✅ Iceberg benchmark tier (`--bench iceberg_e2e`) + runnable Iceberg example
+  with snapshot pinning (`--example iceberg_graph`) and documented REST/Glue
+  catalog wiring
+- ✅ docs.rs embedding guide (crate-level docs in `fusiongraph-datafusion`)
+
 ### In progress / next (see [ROADMAP](docs/ROADMAP.md))
-- 🔜 100M-edge and skewed-degree (R-MAT) benchmark tier
-- 🔜 Iceberg benchmark tier + REST/Glue catalog examples
+- 🔜 Direction-optimizing BFS (needs CSR transpose)
+- 🔜 Delta-layer compaction (delta slow path measured at ~74x vs. clean)
 
 ### Explicitly deferred (not in MVP scope)
 - ⏸️ Hand-written SIMD intrinsics — the `SimdBackend` trait exists with

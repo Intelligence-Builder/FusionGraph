@@ -50,5 +50,14 @@ harness = false
 name = "parquet_e2e"
 harness = false
 
+[[bench]]
+name = "iceberg_e2e"
+harness = false
+required-features = ["iceberg"]
+
+[[example]]
+name = "iceberg_graph"
+required-features = ["iceberg"]
+
 [lints]
 workspace = true

@@ -13,6 +13,7 @@ pub mod circuit_breaker;
 pub mod csr;
 pub mod delta;
 pub mod error;
+pub mod gen;
 pub mod traversal;
 pub mod types;
 
