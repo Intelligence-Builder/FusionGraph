@@ -70,6 +70,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod dictionary;
 pub mod error;
 pub mod exec;
 #[cfg(feature = "iceberg")]
@@ -78,6 +79,7 @@ pub mod loader;
 pub mod provider;
 pub mod udtf;
 
+pub use dictionary::NodeDictionary;
 pub use error::DataFusionError;
 pub use exec::{new_graph_sink, CSRBuilderExec, CsrBuildConfig, GraphSink, GraphTraversalExec};
 #[cfg(feature = "iceberg")]

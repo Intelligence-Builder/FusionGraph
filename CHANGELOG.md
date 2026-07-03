@@ -18,11 +18,22 @@ All notable changes to FusionGraph are documented here. The format follows
   and executes `TraversalDirection::Incoming` as outgoing-on-transpose;
   `graph_traverse` gains a direction argument:
   `graph_traverse('g', 3, 5, 'in')` answers "who can reach node 3?"
-- **Weighted + temporal ontology projection** (#39, partial):
+- **Weighted + temporal ontology projection** (#39):
   `weight_column` flows through `CsrBuildConfig` into weighted CSR storage
   (NULLs default to 1.0); `register_ontology_graphs_as_of` filters edges by
-  `valid_from`/`valid_to` at an instant (string/UUID ID transforms remain
-  open)
+  `valid_from`/`valid_to` at an instant
+- **String/UUID node IDs via dictionary encoding** (#39): `NodeDictionary`
+  maps original keys to dense IDs (subsumes the hash transforms for a dense
+  CSR: deterministic, collision-free, reversible); string start nodes in
+  `graph_traverse('g', 'alice', 3)`; `graph_nodes('g')` table function for
+  joining keys back; `extract_numeric` handled on the numeric path via
+  `regexp_replace`; dictionary survives catalog compaction swaps
+- **DuckPGQ cross-engine harness** (#35, `benchmarks/duckpgq/`): same
+  Parquet, semantics parity asserted (584 = 584 = 584). Measured: DuckDB
+  joins ~21 ms (validates the relational baseline), DuckPGQ quantified-path
+  `GRAPH_TABLE` ~135 s at 10M edges vs 12.4 µs for the operator
+- **On-demand benchmark workflow** (#36 partial): `workflow_dispatch` CI job
+  capturing x86_64 backend numbers with artifacts (noise caveat documented)
 - **`GraphTableProvider` implemented** (#37): `new(ontology)` exposes the
   canonical merged edge list `(source, target, label)`; `materialize(ctx)`
   builds the merged CSR + scannable batches from all edge definitions;

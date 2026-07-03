@@ -213,11 +213,11 @@ All remaining roadmap work is filed as GitHub issues:
 |---|---|
 | [#33](https://github.com/Intelligence-Builder/FusionGraph/issues/33) | Release v0.1.0 to crates.io (runbook: `docs/RELEASING.md`) |
 | [#34](https://github.com/Intelligence-Builder/FusionGraph/issues/34) | `datafusion-contrib` proposal (blocked on #33) |
-| [#35](https://github.com/Intelligence-Builder/FusionGraph/issues/35) | DuckPGQ cross-engine benchmark harness |
-| [#36](https://github.com/Intelligence-Builder/FusionGraph/issues/36) | AVX2/AVX-512 timing on dedicated x86_64 hardware |
+| [#35](https://github.com/Intelligence-Builder/FusionGraph/issues/35) | ✅ done 2026-07-03 — harness + measured results in `benchmarks/duckpgq/` |
+| [#36](https://github.com/Intelligence-Builder/FusionGraph/issues/36) | ◐ on-demand CI bench workflow added; quiet-hardware numbers remain |
 | [#37](https://github.com/Intelligence-Builder/FusionGraph/issues/37) | ✅ done 2026-07-03 — `GraphTableProvider` scan/materialize/traversal-plan |
 | [#38](https://github.com/Intelligence-Builder/FusionGraph/issues/38) | ✅ done 2026-07-03 — DO-BFS + `'in'` direction in `graph_traverse` |
-| [#39](https://github.com/Intelligence-Builder/FusionGraph/issues/39) | ◐ weights + temporal done 2026-07-03; ID transforms remain |
+| [#39](https://github.com/Intelligence-Builder/FusionGraph/issues/39) | ✅ done 2026-07-03 — weights, temporal, dictionary-encoded string/UUID IDs |
 | [#40](https://github.com/Intelligence-Builder/FusionGraph/issues/40) | ✅ done 2026-07-03 — `CompactionPolicy` + `compact_if_needed` with replay |
 
 ## 4. Explicitly Deferred (kill list until further notice)

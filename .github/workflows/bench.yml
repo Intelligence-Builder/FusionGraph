@@ -1,0 +1,37 @@
+name: Benchmarks (on demand)
+
+# Manual-dispatch benchmark capture. Shared runners are noisy — treat these
+# numbers as indicative (issue #36 tracks proper numbers from quiet
+# hardware) — but the x86_64 runner is the only routinely available AVX2
+# machine for this project, so an on-demand capture beats no data.
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: "criterion filter (e.g. bfs_backend, bfs_rmat, khop)"
+        required: false
+        default: "bfs_backend"
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: CPU features
+        run: grep -o -m1 'avx2\|avx512f' /proc/cpuinfo | sort -u || true
+      - name: Run benchmark
+        run: |
+          cargo bench -p fusiongraph-core --bench traversal -- --quick "${{ inputs.filter }}" \
+            | tee bench-output.txt
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ github.run_id }}
+          path: |
+            bench-output.txt
+            target/criterion/**/estimates.json
+          if-no-files-found: warn

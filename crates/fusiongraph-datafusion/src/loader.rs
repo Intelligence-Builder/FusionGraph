@@ -23,8 +23,9 @@ use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::collect;
 use datafusion::prelude::SessionContext;
 
-use fusiongraph_ontology::{EdgeDefinition, Ontology};
+use fusiongraph_ontology::{EdgeDefinition, IdTransform, Ontology};
 
+use crate::dictionary::NodeDictionary;
 use crate::exec::{new_graph_sink, CSRBuilderExec, CsrBuildConfig};
 use crate::udtf::GraphCatalog;
 
@@ -55,8 +56,26 @@ pub fn graph_name(ontology: &Ontology, edge: &EdgeDefinition) -> String {
 /// weighted CSR, cast to `Float32`, NULLs default to 1.0) and temporal
 /// validity columns (see [`register_ontology_graphs_as_of`]).
 ///
-/// Current limitations (documented, enforced by clear errors where possible):
-/// - string/UUID ID transforms are not applied; IDs must be integers
+/// ## ID handling
+///
+/// Determined per edge from the referenced node definitions' `id_transform`
+/// (and `settings.default_node_id_type`):
+///
+/// - `passthrough` (default): integer columns, cast to `UInt64`
+/// - `extract_numeric`: digits extracted from string IDs
+///   (e.g. `"user_42"` → 42) via `regexp_replace`, then cast
+/// - `hash_u64` / `hash_u32` / `uuid_to_u128`, or
+///   `default_node_id_type = "string"`: **dictionary encoding** — each
+///   distinct key gets the next dense ID. For a dense CSR this subsumes
+///   hashing (deterministic within a build, collision-free, reversible);
+///   the graph is registered with a
+///   [`NodeDictionary`](crate::dictionary::NodeDictionary), enabling string
+///   start nodes in `graph_traverse` and key join-back via
+///   `graph_nodes('name')`.
+///
+/// Composite `id_column` keys apply to node tables; [`EdgeDefinition`] has
+/// single `from_column`/`to_column` fields, so composite *edge* keys are
+/// not representable in the schema.
 ///
 /// # Errors
 ///
@@ -97,7 +116,8 @@ pub async fn register_ontology_graphs_as_of(
     let mut registered = Vec::with_capacity(ontology.edges.len());
 
     for edge in &ontology.edges {
-        let graph = build_edge_graph(ctx, edge, as_of).await.map_err(|e| {
+        let name = graph_name(ontology, edge);
+        let context = |e| {
             DataFusionError::Context(
                 format!(
                     "while projecting edge '{}' from table '{}'",
@@ -105,25 +125,73 @@ pub async fn register_ontology_graphs_as_of(
                 ),
                 Box::new(e),
             )
-        })?;
+        };
 
-        let name = graph_name(ontology, edge);
-        catalog.register(name.clone(), graph);
+        if needs_dictionary(ontology, edge) {
+            let (graph, dictionary) = build_edge_graph_with_dictionary(ctx, edge, as_of)
+                .await
+                .map_err(context)?;
+            catalog.register_with_dictionary(name.clone(), graph, dictionary);
+        } else {
+            let graph = build_edge_graph(ctx, ontology, edge, as_of)
+                .await
+                .map_err(context)?;
+            catalog.register(name.clone(), graph);
+        }
         registered.push(name);
     }
 
     Ok(registered)
 }
 
-/// Builds a CSR graph for a single edge definition via the operator pipeline.
-async fn build_edge_graph(
-    ctx: &SessionContext,
+/// Whether the edge's node references require dictionary encoding
+/// (string-keyed IDs that cannot address a dense CSR directly).
+fn needs_dictionary(ontology: &Ontology, edge: &EdgeDefinition) -> bool {
+    if ontology.settings.default_node_id_type == fusiongraph_ontology::IdType::String {
+        return true;
+    }
+    [&edge.from_node, &edge.to_node]
+        .into_iter()
+        .filter_map(|label| ontology.node(label))
+        .any(|node| {
+            matches!(
+                node.id_transform,
+                IdTransform::HashU64 | IdTransform::HashU32 | IdTransform::UuidToU128
+            )
+        })
+}
+
+/// Projection expression for one ID column on the numeric path, honoring
+/// the referenced node's `id_transform`.
+fn numeric_id_expr(
+    ontology: &Ontology,
+    node_label: &str,
+    column: &str,
+) -> datafusion::logical_expr::Expr {
+    use datafusion::logical_expr::lit;
+    let extract = ontology
+        .node(node_label)
+        .is_some_and(|n| n.id_transform == IdTransform::ExtractNumeric);
+    let source = if extract {
+        // Strip every non-digit character, then cast: "user_42" -> 42.
+        datafusion::functions::regex::expr_fn::regexp_replace(
+            col(column),
+            lit("[^0-9]"),
+            lit(""),
+            Some(lit("g")),
+        )
+    } else {
+        col(column)
+    };
+    cast(source, DataType::UInt64).alias(column)
+}
+
+/// Applies the temporal validity filter for `as_of`, when configured.
+fn apply_temporal_filter(
+    mut df: datafusion::dataframe::DataFrame,
     edge: &EdgeDefinition,
     as_of: Option<&str>,
-) -> Result<Arc<fusiongraph_core::CsrGraph>> {
-    let mut df = ctx.table(edge.source.as_str()).await?;
-
-    // Temporal filtering: only edges valid at `as_of`.
+) -> Result<datafusion::dataframe::DataFrame> {
     if let Some(instant) = as_of {
         use datafusion::logical_expr::lit;
         if let Some(from_col) = &edge.valid_from_column {
@@ -137,14 +205,26 @@ async fn build_edge_graph(
             )?;
         }
     }
+    Ok(df)
+}
+
+/// Builds a CSR graph for a single edge definition via the operator pipeline.
+async fn build_edge_graph(
+    ctx: &SessionContext,
+    ontology: &Ontology,
+    edge: &EdgeDefinition,
+    as_of: Option<&str>,
+) -> Result<Arc<fusiongraph_core::CsrGraph>> {
+    let df = ctx.table(edge.source.as_str()).await?;
+    let df = apply_temporal_filter(df, edge, as_of)?;
 
     // Selective projection: only the columns the kernel needs leave the
     // scan. Casting to UInt64 accepts the common lakehouse integer ID types
     // (Int32/Int64/UInt32/UInt64); invalid values surface as cast errors at
     // execution. Weights are cast to the CSR's Float32 storage.
     let mut projection = vec![
-        cast(col(edge.from_column.as_str()), DataType::UInt64).alias(edge.from_column.as_str()),
-        cast(col(edge.to_column.as_str()), DataType::UInt64).alias(edge.to_column.as_str()),
+        numeric_id_expr(ontology, &edge.from_node, &edge.from_column),
+        numeric_id_expr(ontology, &edge.to_node, &edge.to_column),
     ];
     if let Some(weight) = &edge.weight_column {
         projection.push(cast(col(weight.as_str()), DataType::Float32).alias(weight.as_str()));
@@ -171,6 +251,101 @@ async fn build_edge_graph(
             "CSRBuilderExec completed without publishing a graph".to_string(),
         )
     })
+}
+
+/// Builds a CSR graph for a string-keyed edge definition, interning node
+/// keys into a [`NodeDictionary`] (see the module docs on ID handling).
+///
+/// Dictionary projection collects the scan (not streaming yet): interning
+/// requires observing every key before the CSR build anyway.
+async fn build_edge_graph_with_dictionary(
+    ctx: &SessionContext,
+    edge: &EdgeDefinition,
+    as_of: Option<&str>,
+) -> Result<(Arc<fusiongraph_core::CsrGraph>, Arc<NodeDictionary>)> {
+    use arrow_array::{Float32Array, StringArray};
+
+    let df = ctx.table(edge.source.as_str()).await?;
+    let df = apply_temporal_filter(df, edge, as_of)?;
+
+    let mut projection = vec![
+        cast(col(edge.from_column.as_str()), DataType::Utf8).alias(edge.from_column.as_str()),
+        cast(col(edge.to_column.as_str()), DataType::Utf8).alias(edge.to_column.as_str()),
+    ];
+    let weighted = edge.weight_column.is_some();
+    if let Some(weight) = &edge.weight_column {
+        projection.push(cast(col(weight.as_str()), DataType::Float32).alias(weight.as_str()));
+    }
+    let df = df.select(projection)?;
+
+    let mut dictionary = NodeDictionary::new();
+    let mut edges: Vec<(u64, u64)> = Vec::new();
+    let mut weights: Vec<f32> = Vec::new();
+
+    for batch in df.collect().await? {
+        let from = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| {
+                DataFusionError::Execution(format!(
+                    "ID column '{}' did not cast to Utf8",
+                    edge.from_column
+                ))
+            })?;
+        let to = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| {
+                DataFusionError::Execution(format!(
+                    "ID column '{}' did not cast to Utf8",
+                    edge.to_column
+                ))
+            })?;
+        let weight_col = if weighted {
+            Some(
+                batch
+                    .column(2)
+                    .as_any()
+                    .downcast_ref::<Float32Array>()
+                    .ok_or_else(|| {
+                        DataFusionError::Execution(
+                            "weight column did not cast to Float32".to_string(),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        for i in 0..batch.num_rows() {
+            if arrow_array::Array::is_null(from, i) || arrow_array::Array::is_null(to, i) {
+                continue;
+            }
+            let f = dictionary.get_or_insert(from.value(i));
+            let t = dictionary.get_or_insert(to.value(i));
+            edges.push((f, t));
+            if let Some(w) = weight_col {
+                weights.push(if arrow_array::Array::is_null(w, i) {
+                    1.0
+                } else {
+                    w.value(i)
+                });
+            }
+        }
+    }
+
+    let builder = fusiongraph_core::csr::CsrBuilder::new();
+    let graph = if weighted {
+        builder.with_weighted_edges(edges.into_iter().zip(weights).map(|((f, t), w)| (f, t, w)))
+    } else {
+        builder.with_edges(edges)
+    }
+    .build()
+    .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+    Ok((Arc::new(graph), Arc::new(dictionary)))
 }
 
 #[cfg(test)]
@@ -477,5 +652,230 @@ valid_to_column = "valid_to"
             .await
             .unwrap();
         assert_eq!(catalog3.get("t.GRANTS").unwrap().edge_count(), 2);
+    }
+
+    fn string_edge_ctx() -> SessionContext {
+        use arrow_array::StringArray;
+        let ctx = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("follower", DataType::Utf8, false),
+            Field::new("followee", DataType::Utf8, false),
+        ]));
+        // alice -> bob -> carol, alice -> carol.
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(StringArray::from(vec!["alice", "bob", "alice"])),
+                Arc::new(StringArray::from(vec!["bob", "carol", "carol"])),
+            ],
+        )
+        .unwrap();
+        ctx.register_table(
+            "follows",
+            Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+        )
+        .unwrap();
+        ctx
+    }
+
+    const STRING_ONTOLOGY: &str = r#"
+[ontology]
+name = "social"
+
+[settings]
+default_node_id_type = "string"
+
+[[nodes]]
+label = "User"
+source = "follows"
+id_column = "follower"
+
+[[edges]]
+label = "FOLLOWS"
+source = "follows"
+from_node = "User"
+from_column = "follower"
+to_node = "User"
+to_column = "followee"
+"#;
+
+    #[tokio::test]
+    async fn string_keyed_ontology_builds_dictionary_graph() {
+        let ctx = string_edge_ctx();
+        let ontology = Ontology::from_toml(STRING_ONTOLOGY).unwrap();
+        let catalog = GraphCatalog::new();
+        register_graph_traverse(&ctx, &catalog);
+
+        let names = register_ontology_graphs(&ctx, &ontology, &catalog)
+            .await
+            .unwrap();
+        assert_eq!(names, vec!["social.FOLLOWS".to_string()]);
+
+        let dict = catalog.dictionary("social.FOLLOWS").expect("dictionary");
+        assert_eq!(dict.len(), 3);
+        assert_eq!(dict.id_of("alice"), Some(0));
+        assert_eq!(dict.key_of(2), Some("carol"));
+
+        // Traverse by string start node, join keys back via graph_nodes.
+        let batches = ctx
+            .sql(
+                "SELECT k.node_key, t.depth \
+                 FROM graph_traverse('social.FOLLOWS', 'alice', 3) t \
+                 JOIN graph_nodes('social.FOLLOWS') k ON k.node_id = t.node_id \
+                 ORDER BY t.depth, k.node_key",
+            )
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let batch = &batches[0];
+        assert_eq!(batch.num_rows(), 3);
+        let keys = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<arrow_array::StringArray>()
+            .unwrap();
+        assert_eq!(keys.value(0), "alice");
+        // bob and carol both reachable; carol at depth 1 via direct edge.
+        assert_eq!(keys.value(1), "bob");
+        assert_eq!(keys.value(2), "carol");
+    }
+
+    #[tokio::test]
+    async fn unknown_string_start_node_errors() {
+        let ctx = string_edge_ctx();
+        let ontology = Ontology::from_toml(STRING_ONTOLOGY).unwrap();
+        let catalog = GraphCatalog::new();
+        register_graph_traverse(&ctx, &catalog);
+        register_ontology_graphs(&ctx, &ontology, &catalog)
+            .await
+            .unwrap();
+
+        let err = ctx
+            .sql("SELECT * FROM graph_traverse('social.FOLLOWS', 'mallory', 3)")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("'mallory' not found"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn string_start_without_dictionary_errors() {
+        let (ctx, catalog, ontology) = setup(); // integer-keyed graphs
+        register_ontology_graphs(&ctx, &ontology, &catalog)
+            .await
+            .unwrap();
+
+        let err = ctx
+            .sql("SELECT * FROM graph_traverse('iam_graph.CAN_ASSUME', 'alice', 3)")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no node-key dictionary"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn extract_numeric_transform_parses_prefixed_ids() {
+        use arrow_array::StringArray;
+        let ctx = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("src", DataType::Utf8, false),
+            Field::new("dst", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(StringArray::from(vec!["user_0", "user_1"])),
+                Arc::new(StringArray::from(vec!["user_1", "user_2"])),
+            ],
+        )
+        .unwrap();
+        ctx.register_table(
+            "prefixed",
+            Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+        )
+        .unwrap();
+
+        let ontology = Ontology::from_toml(
+            r#"
+[ontology]
+name = "p"
+
+[[nodes]]
+label = "U"
+source = "prefixed"
+id_column = "src"
+id_transform = "extract_numeric"
+
+[[edges]]
+label = "E"
+source = "prefixed"
+from_node = "U"
+from_column = "src"
+to_node = "U"
+to_column = "dst"
+"#,
+        )
+        .unwrap();
+
+        let catalog = GraphCatalog::new();
+        register_ontology_graphs(&ctx, &ontology, &catalog)
+            .await
+            .unwrap();
+
+        let graph = catalog.get("p.E").unwrap();
+        assert!(
+            catalog.dictionary("p.E").is_none(),
+            "extract_numeric is a numeric path, no dictionary"
+        );
+        // "user_0" -> 0, "user_1" -> 1, "user_2" -> 2.
+        assert!(graph.has_edge(
+            fusiongraph_core::NodeId::new(0),
+            fusiongraph_core::NodeId::new(1)
+        ));
+        assert!(graph.has_edge(
+            fusiongraph_core::NodeId::new(1),
+            fusiongraph_core::NodeId::new(2)
+        ));
+    }
+
+    #[tokio::test]
+    async fn dictionary_survives_compaction_swap() {
+        use fusiongraph_core::types::EdgeData;
+        use fusiongraph_core::CompactionPolicy;
+
+        let ctx = string_edge_ctx();
+        let ontology = Ontology::from_toml(STRING_ONTOLOGY).unwrap();
+        let catalog = GraphCatalog::new();
+        register_ontology_graphs(&ctx, &ontology, &catalog)
+            .await
+            .unwrap();
+
+        // Mutate past a strict policy, compact, and verify the dictionary
+        // still resolves keys against the swapped entry.
+        let graph = catalog.get("social.FOLLOWS").unwrap();
+        graph.delta().insert(
+            fusiongraph_core::NodeId::new(2),
+            fusiongraph_core::NodeId::new(0),
+            EdgeData::default(),
+        );
+        let strict = CompactionPolicy {
+            max_delta_entries: 1,
+            max_delta_ratio: 10.0,
+        };
+        assert!(catalog
+            .compact_if_needed("social.FOLLOWS", &strict)
+            .unwrap());
+
+        let dict = catalog
+            .dictionary("social.FOLLOWS")
+            .expect("dictionary preserved across compaction");
+        assert_eq!(dict.id_of("alice"), Some(0));
+        let compacted = catalog.get("social.FOLLOWS").unwrap();
+        assert!(compacted.has_edge(
+            fusiongraph_core::NodeId::new(2),
+            fusiongraph_core::NodeId::new(0)
+        ));
     }
 }

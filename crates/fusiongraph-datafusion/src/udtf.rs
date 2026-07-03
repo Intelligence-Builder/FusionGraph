@@ -13,7 +13,9 @@
 //!
 //! Arguments (positional, literals):
 //! 1. `graph_name` (string) — name registered in the [`GraphCatalog`]
-//! 2. `start_node` (integer) — node ID to start the BFS from
+//! 2. `start_node` (integer, or string for dictionary-keyed graphs) — node
+//!    to start the BFS from; string keys resolve through the graph's
+//!    [`NodeDictionary`](crate::dictionary::NodeDictionary)
 //! 3. `max_hops` (integer) — maximum traversal depth
 //! 4. `max_nodes` (integer, optional) — cap on visited nodes
 //! 5. `direction` (string, optional): `'out'` (default) or `'in'`. `'in'`
@@ -58,11 +60,13 @@ pub struct GraphCatalog {
     graphs: RwLock<HashMap<String, Arc<GraphEntry>>>,
 }
 
-/// A registered graph plus its lazily-built, memoized transpose.
+/// A registered graph plus its lazily-built, memoized transpose and an
+/// optional node-key dictionary (string-keyed graphs).
 #[derive(Debug)]
 struct GraphEntry {
     forward: Arc<CsrGraph>,
     reverse: OnceLock<Arc<CsrGraph>>,
+    dictionary: Option<Arc<crate::dictionary::NodeDictionary>>,
 }
 
 impl GraphEntry {
@@ -70,6 +74,7 @@ impl GraphEntry {
         Arc::new(Self {
             forward,
             reverse: OnceLock::new(),
+            dictionary: None,
         })
     }
 }
@@ -114,6 +119,41 @@ impl GraphCatalog {
             .write()
             .expect("graph catalog lock poisoned")
             .insert(name.into(), entry);
+    }
+
+    /// Registers a string-keyed graph together with its node-key
+    /// dictionary, enabling string start nodes in `graph_traverse` and the
+    /// `graph_nodes` table function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned (a writer panicked).
+    pub fn register_with_dictionary(
+        &self,
+        name: impl Into<String>,
+        forward: Arc<CsrGraph>,
+        dictionary: Arc<crate::dictionary::NodeDictionary>,
+    ) {
+        let entry = Arc::new(GraphEntry {
+            forward,
+            reverse: OnceLock::new(),
+            dictionary: Some(dictionary),
+        });
+        self.graphs
+            .write()
+            .expect("graph catalog lock poisoned")
+            .insert(name.into(), entry);
+    }
+
+    /// Returns the node-key dictionary for `name`, if the graph was
+    /// registered with one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned (a writer panicked).
+    #[must_use]
+    pub fn dictionary(&self, name: &str) -> Option<Arc<crate::dictionary::NodeDictionary>> {
+        self.entry(name).and_then(|e| e.dictionary.clone())
     }
 
     fn entry(&self, name: &str) -> Option<Arc<GraphEntry>> {
@@ -194,7 +234,17 @@ impl GraphCatalog {
             compacted.delta().delete(from, to);
         }
 
-        self.register(name.to_string(), Arc::new(compacted));
+        // Node identity is unchanged by compaction: the dictionary carries
+        // over. The memoized transpose is intentionally reset (stale).
+        let new_entry = Arc::new(GraphEntry {
+            forward: Arc::new(compacted),
+            reverse: OnceLock::new(),
+            dictionary: entry.dictionary.clone(),
+        });
+        self.graphs
+            .write()
+            .expect("graph catalog lock poisoned")
+            .insert(name.to_string(), new_entry);
         Ok(true)
     }
 
@@ -251,6 +301,54 @@ pub fn register_graph_traverse(ctx: &SessionContext, catalog: &Arc<GraphCatalog>
             catalog: Arc::clone(catalog),
         }),
     );
+    ctx.register_udtf(
+        "graph_nodes",
+        Arc::new(GraphNodesUdtf {
+            catalog: Arc::clone(catalog),
+        }),
+    );
+}
+
+/// `graph_nodes('name')`: serves a dictionary-keyed graph's
+/// `(node_id UInt64, node_key Utf8)` mapping as a table, so traversal
+/// results join back to original keys:
+///
+/// ```sql
+/// SELECT k.node_key, t.depth
+/// FROM graph_traverse('g', 'alice', 3) t
+/// JOIN graph_nodes('g') k ON k.node_id = t.node_id
+/// ```
+#[derive(Debug)]
+struct GraphNodesUdtf {
+    catalog: Arc<GraphCatalog>,
+}
+
+impl TableFunctionImpl for GraphNodesUdtf {
+    fn call(&self, args: &[Expr]) -> Result<Arc<dyn TableProvider>> {
+        if args.len() != 1 {
+            return Err(DataFusionError::Plan(format!(
+                "graph_nodes expects 1 argument (graph_name), got {}",
+                args.len()
+            )));
+        }
+        let name = GraphTraverseUdtf::parse_string(args.first(), "1 (graph_name)")?;
+        let dictionary = self.catalog.dictionary(&name).ok_or_else(|| {
+            DataFusionError::Plan(format!(
+                "graph_nodes: graph '{name}' has no node-key dictionary (only \
+                 graphs projected from string-keyed ontologies have one); \
+                 available graphs: {:?}",
+                self.catalog.names()
+            ))
+        })?;
+        let batch = dictionary
+            .to_batch()
+            .map_err(|e| DataFusionError::ArrowError(e, None))?;
+        let table = datafusion::datasource::MemTable::try_new(
+            crate::dictionary::NodeDictionary::schema(),
+            vec![vec![batch]],
+        )?;
+        Ok(Arc::new(table))
+    }
 }
 
 /// [`TableFunctionImpl`] backing the `graph_traverse` SQL function.
@@ -302,7 +400,31 @@ impl TableFunctionImpl for GraphTraverseUdtf {
         }
 
         let graph_name = Self::parse_string(args.first(), "1 (graph_name)")?;
-        let start_node = Self::parse_u64(args.get(1), "2 (start_node)")?;
+
+        // Start node: integer, or a string key resolved via the graph's
+        // node dictionary.
+        let start_node = if matches!(
+            args.get(1),
+            Some(Expr::Literal(
+                ScalarValue::Utf8(Some(_)) | ScalarValue::LargeUtf8(Some(_))
+            ))
+        ) {
+            let key = Self::parse_string(args.get(1), "2 (start_node)")?;
+            let dictionary = self.catalog.dictionary(&graph_name).ok_or_else(|| {
+                DataFusionError::Plan(format!(
+                    "graph_traverse: start node '{key}' is a string but graph \
+                     '{graph_name}' has no node-key dictionary; use an integer \
+                     node ID or project the graph from a string-keyed ontology"
+                ))
+            })?;
+            dictionary.id_of(&key).ok_or_else(|| {
+                DataFusionError::Plan(format!(
+                    "graph_traverse: node key '{key}' not found in graph '{graph_name}'"
+                ))
+            })?
+        } else {
+            Self::parse_u64(args.get(1), "2 (start_node)")?
+        };
         let max_hops = Self::parse_u64(args.get(2), "3 (max_hops)")?;
 
         // Position 4 is `max_nodes` (integer) or `direction` (string).
