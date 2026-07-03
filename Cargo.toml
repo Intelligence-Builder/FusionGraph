@@ -10,10 +10,15 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+# Bounded by iceberg 0.5.1 (1.85); datafusion 47 needs 1.82, arrow 55 needs 1.81.
+rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/Intelligence-Builder/FusionGraph"
+homepage = "https://github.com/Intelligence-Builder/FusionGraph"
 authors = ["Intelligence-Builder"]
+readme = "README.md"
+keywords = ["graph", "datafusion", "arrow", "iceberg", "traversal"]
+categories = ["database-implementations", "data-structures", "algorithms"]
 
 [workspace.dependencies]
 # Arrow ecosystem
@@ -59,11 +64,11 @@ num_cpus = "1.16"
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 
-# Internal crates
-fusiongraph-core = { path = "crates/fusiongraph-core" }
-fusiongraph-ontology = { path = "crates/fusiongraph-ontology" }
-fusiongraph-datafusion = { path = "crates/fusiongraph-datafusion" }
-fusiongraph-ffi = { path = "crates/fusiongraph-ffi" }
+# Internal crates (version required for crates.io publishing; path wins locally)
+fusiongraph-core = { path = "crates/fusiongraph-core", version = "0.1.0" }
+fusiongraph-ontology = { path = "crates/fusiongraph-ontology", version = "0.1.0" }
+fusiongraph-datafusion = { path = "crates/fusiongraph-datafusion", version = "0.1.0" }
+fusiongraph-ffi = { path = "crates/fusiongraph-ffi", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

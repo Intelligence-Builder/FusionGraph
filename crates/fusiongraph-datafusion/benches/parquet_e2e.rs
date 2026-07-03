@@ -39,7 +39,7 @@ const SEED: u64 = 0x5EED_CAFE;
 /// Edges per generated record batch (keeps peak memory bounded).
 const BATCH_NODES: u64 = 125_000;
 
-fn xorshift(state: &mut u64) -> u64 {
+const fn xorshift(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
     *state ^= *state << 17;

@@ -51,7 +51,7 @@ const FIELD_ID_KEY: &str = "PARQUET:field_id";
 /// Rows per written batch (bounds writer memory).
 const BATCH_ROWS: u64 = 1_000_000;
 
-fn xorshift(state: &mut u64) -> u64 {
+const fn xorshift(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
     *state ^= *state << 17;

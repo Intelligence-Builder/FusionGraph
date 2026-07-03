@@ -1,5 +1,10 @@
 # FusionGraph
 
+[![CI](https://github.com/Intelligence-Builder/FusionGraph/actions/workflows/ci.yml/badge.svg)](https://github.com/Intelligence-Builder/FusionGraph/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Rust 1.85+](https://img.shields.io/badge/Rust-1.85+-orange.svg)](https://www.rust-lang.org/)
+[![DataFusion 47](https://img.shields.io/badge/DataFusion-47-blueviolet.svg)](https://datafusion.apache.org/)
+
 **Zero-ETL graph traversal for Apache DataFusion.**
 
 FusionGraph is an open-source (Apache 2.0), embeddable graph execution layer for
@@ -255,10 +260,18 @@ documents**, not commitments — each is marked with a status banner.
 | `fusiongraph-datafusion` | DataFusion `TableProvider` and `ExecutionPlan` operators |
 | `fusiongraph-ffi` | Arrow C Data Interface bindings |
 
+## Releasing
+
+All four crates are publish-ready (names verified available on crates.io,
+leaf crates pass `cargo publish --dry-run`). See
+[docs/RELEASING.md](docs/RELEASING.md) for the dependency-ordered publish
+runbook.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). PRs must pass `cargo test`,
-`cargo clippy -- -D warnings`, and `cargo fmt --check`.
+`cargo clippy -- -D warnings`, and `cargo fmt --check` — enforced by CI on
+x86_64 Linux and aarch64 macOS.
 
 ## License
 

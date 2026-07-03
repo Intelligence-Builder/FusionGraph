@@ -73,7 +73,7 @@ impl AtomicBitset {
 
     /// Clears all bits.
     pub fn clear(&self) {
-        for word in self.bits.iter() {
+        for word in &self.bits {
             word.store(0, Ordering::Release);
         }
     }

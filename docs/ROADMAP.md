@@ -180,8 +180,15 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
       (FG-TRV-E002). Measured on R-MAT hub traversals:
       **2.2x at 8.4M edges (3-hop), 3.2x at 100M edges (443 ms → 140 ms,
       ~714M edges/sec)**.
-- [ ] crates.io publishing prep: version metadata, README badges, dry-run
-      `cargo publish` for the four crates in dependency order
+- [x] crates.io publishing prep (2026-07-03): all four names verified
+      available; keywords/categories/readme/license metadata complete
+      (workspace-inherited); per-crate LICENSE copies; internal deps carry
+      `version` requirements; MSRV corrected 1.75 → 1.85 (bounded by
+      iceberg 0.5.1; DF 47 needs 1.82, arrow 55 needs 1.81); leaf crates
+      pass `cargo publish --dry-run` with build verification; CI/license/
+      MSRV badges in README; runbook in `docs/RELEASING.md`.
+      **Actual publish is a human action** (crates.io account + token) —
+      follow the runbook.
 - [ ] Propose to `datafusion-contrib` once published (distribution +
       ecosystem credibility — see §2 Guiding Principles #4)
 - [ ] DuckPGQ / recursive-CTE comparative benchmarks

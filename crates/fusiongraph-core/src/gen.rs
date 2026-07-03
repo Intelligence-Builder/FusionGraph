@@ -11,7 +11,7 @@
 
 /// Deterministic xorshift64 PRNG step.
 #[inline]
-fn xorshift(state: &mut u64) -> u64 {
+const fn xorshift(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
     *state ^= *state << 17;
