@@ -24,7 +24,7 @@
 //!    the direction, so `graph_traverse('g', 0, 3, 'in')` works without a
 //!    `max_nodes`.
 //!
-//! Output schema matches [`GraphTraversalExec`](crate::GraphTraversalExec):
+//! Output schema matches [`GraphTraversalExec`]:
 //! `node_id UInt64, depth UInt32, path List<UInt64>` (path is currently NULL
 //! until parent tracking is implemented).
 

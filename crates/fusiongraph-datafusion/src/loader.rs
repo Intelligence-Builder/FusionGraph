@@ -69,7 +69,7 @@ pub fn graph_name(ontology: &Ontology, edge: &EdgeDefinition) -> String {
 ///   distinct key gets the next dense ID. For a dense CSR this subsumes
 ///   hashing (deterministic within a build, collision-free, reversible);
 ///   the graph is registered with a
-///   [`NodeDictionary`](crate::dictionary::NodeDictionary), enabling string
+///   [`NodeDictionary`], enabling string
 ///   start nodes in `graph_traverse` and key join-back via
 ///   `graph_nodes('name')`.
 ///

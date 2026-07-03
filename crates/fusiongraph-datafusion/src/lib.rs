@@ -43,11 +43,26 @@
 //! FROM graph_traverse('iam_graph.CAN_ASSUME', 0, 3) t
 //! LEFT JOIN edges e ON e.source = t.node_id
 //! GROUP BY t.node_id, t.depth;
+//!
+//! -- incoming edges ("who can reach X?") over the memoized transpose:
+//! SELECT * FROM graph_traverse('iam_graph.CAN_ASSUME', 3, 5, 'in');
+//!
+//! -- string-keyed (dictionary-encoded) graphs:
+//! SELECT k.node_key, t.depth
+//! FROM graph_traverse('social.FOLLOWS', 'alice', 3) t
+//! JOIN graph_nodes('social.FOLLOWS') k ON k.node_id = t.node_id;
 //! ```
 //!
 //! Traversal results are ordinary tables: joins, filters, aggregations, and
 //! `LIMIT` all compose. Or call the kernel directly from Rust via
 //! `fusiongraph_core::traversal::bfs`.
+//!
+//! ## 4. Operate
+//!
+//! Live mutations accumulate in the delta layer (~74x traversal penalty
+//! when dirty); bound it with a [`CompactionPolicy`](fusiongraph_core::CompactionPolicy)
+//! and [`GraphCatalog::compact_if_needed`], which atomically swaps the
+//! registry entry and replays racing writes.
 //!
 //! # Feature flags
 //!
@@ -59,9 +74,13 @@
 //!
 //! - [`CSRBuilderExec`] — physical operator: `RecordBatch` stream → CSR graph
 //! - [`GraphTraversalExec`] — physical operator: BFS as an `ExecutionPlan`
-//! - [`GraphCatalog`] / `graph_traverse` — the SQL surface
-//! - [`register_ontology_graphs`] — declarative table→graph projection
-//! - [`GraphTableProvider`] — ontology-aware `TableProvider`
+//!   (direction-optimizing when a transpose is attached)
+//! - [`GraphCatalog`] / `graph_traverse` / `graph_nodes` — the SQL surface
+//! - [`register_ontology_graphs`] / [`register_ontology_graphs_as_of`] —
+//!   declarative table→graph projection (weights, temporal validity,
+//!   dictionary-encoded string IDs)
+//! - [`NodeDictionary`] — original key ↔ dense ID mapping
+//! - [`GraphTableProvider`] — the ontology's merged edge list as a table
 //!
 //! Runnable demos: `cargo run -p fusiongraph-datafusion --example
 //! graph_traverse` (Parquet) and `--example iceberg_graph` (Iceberg with

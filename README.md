@@ -110,10 +110,16 @@ real operators: table scan → `CoalescePartitionsExec` → `CSRBuilderExec`
 | CSR BFS (kernel) | 2.5 µs | 6.8 µs |
 | `GraphTraversalExec` (operator, incl. Arrow output) | 7.9 µs | 12.4 µs |
 | DataFusion SQL, chained joins on **Parquet** | 10.7 ms | 27.2 ms |
+| DuckDB SQL, chained joins (same file; cross-engine baseline) | — | ~21 ms |
 | DataFusion SQL, **recursive CTE** on Parquet (idiomatic) | 75.2 ms | 93.3 ms |
-| DataFusion SQL, chained joins on **Iceberg** | 91.9 ms | 220 ms |
+| **DuckPGQ** `GRAPH_TABLE` quantified path (same file) | ~130 s | ~135 s |
 | **Speedup (operator vs. Parquet joins)** | **~1,350x** | **~2,190x** |
 | **Speedup (operator vs. recursive CTE)** | **~9,500x** | **~7,500x** |
+
+Iceberg-backed SQL joins measure 91.9 ms / 220 ms (provider scan overhead
+widens the operator's advantage to ~17,700x). The DuckPGQ comparison —
+semantics parity verified, fair-reading caveats included — lives in
+[`benchmarks/duckpgq/`](benchmarks/duckpgq/README.md).
 
 The recursive CTE row matters most: `WITH RECURSIVE` is what users actually
 write for traversal, and it is 3–7x slower than hand-tuned chained joins —
@@ -171,6 +177,16 @@ LEFT JOIN edges e ON e.source = t.node_id
 WHERE t.depth > 0
 GROUP BY t.node_id, t.depth
 ORDER BY t.depth;
+
+-- Inverse blast radius: who can reach node 3? (incoming edges, traversed
+-- over the memoized transpose; direction-optimizing BFS comes free)
+SELECT node_id, depth FROM graph_traverse('iam', 3, 5, 'in');
+
+-- String-keyed graphs (dictionary-encoded ontologies): start from a key,
+-- join original keys back via graph_nodes()
+SELECT k.node_key, t.depth
+FROM graph_traverse('social.FOLLOWS', 'alice', 3) t
+JOIN graph_nodes('social.FOLLOWS') k ON k.node_id = t.node_id;
 ```
 
 Run the full Parquet → CSR → SQL demo:
@@ -214,7 +230,21 @@ Honest inventory, updated 2026-07.
 - ✅ `GraphTableProvider`, `CSRBuilderExec`, `GraphTraversalExec` DataFusion operators
 - ✅ `GraphSink`: capture the built graph from `CSRBuilderExec` for downstream traversal
 - ✅ `graph_traverse()` SQL table function + `GraphCatalog` registry
-  (projection, `WHERE`, `LIMIT`, joins against regular tables all work)
+  (projection, `WHERE`, `LIMIT`, joins against regular tables all work);
+  direction argument (`'in'` = incoming over the memoized transpose) and
+  string start nodes for dictionary-keyed graphs; `graph_nodes()` serves
+  the key mapping for join-back
+- ✅ String/UUID node IDs via dictionary encoding (`NodeDictionary`);
+  `extract_numeric` ID transform on the numeric path
+- ✅ Delta auto-compaction policy (`CompactionPolicy`,
+  `GraphCatalog::compact_if_needed` with racing-write replay)
+- ✅ `GraphTableProvider`: materialized merged edge list
+  (`source, target, label`) queryable as a regular table +
+  `create_traversal_plan`
+- ✅ Weighted (`weight_column`) and temporal
+  (`register_ontology_graphs_as_of`) ontology projection
+- ✅ DuckPGQ cross-engine harness with measured results
+  (`benchmarks/duckpgq/`)
 - ✅ Parquet → CSR end-to-end pipeline, benchmarked at 10M edges
 - ✅ Arrow C Data Interface FFI surface
 - ✅ Criterion benchmarks, including CSR traversal vs. equivalent DataFusion SQL joins
@@ -243,9 +273,10 @@ Honest inventory, updated 2026-07.
 - ✅ docs.rs embedding guide (crate-level docs in `fusiongraph-datafusion`)
 
 ### In progress / next (see [ROADMAP](docs/ROADMAP.md))
-- 🔜 crates.io publishing + `datafusion-contrib` proposal
-  (publish-ready; see [docs/RELEASING.md](docs/RELEASING.md))
-- 🔜 DuckPGQ cross-engine comparison (recursive-CTE baseline ✅ done)
+- 🔜 crates.io publishing (#33) + `datafusion-contrib` proposal (#34) —
+  publish-ready; see [docs/RELEASING.md](docs/RELEASING.md)
+- 🔜 AVX2/AVX-512 timing on quiet x86_64 hardware (#36; on-demand CI
+  workflow available meanwhile: `gh workflow run bench.yml`)
 
 ### Explicitly deferred (not in MVP scope)
 - ⏸️ Hand-written SIMD intrinsics — the `SimdBackend` trait exists with
