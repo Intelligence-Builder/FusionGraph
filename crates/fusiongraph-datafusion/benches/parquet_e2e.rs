@@ -147,6 +147,20 @@ fn khop_sql(k: u32) -> String {
     )
 }
 
+/// Recursive-CTE formulation of k-hop reachability (includes the start
+/// node, matching BFS semantics exactly).
+fn khop_recursive_cte_sql(k: u32) -> String {
+    format!(
+        "WITH RECURSIVE reach (n, depth) AS ( \
+           SELECT CAST(0 AS BIGINT) AS n, 0 AS depth \
+           UNION ALL \
+           SELECT CAST(e.target AS BIGINT), r.depth + 1 \
+           FROM reach r JOIN edges e ON e.source = CAST(r.n AS BIGINT UNSIGNED) \
+           WHERE r.depth < {k} \
+         ) SELECT COUNT(DISTINCT n) FROM reach"
+    )
+}
+
 async fn run_sql_count(ctx: &SessionContext, sql: &str) -> i64 {
     let batches = ctx
         .sql(sql)
@@ -180,6 +194,11 @@ fn bench_parquet_e2e(c: &mut Criterion) {
         (bfs_count - sql_count).abs() <= 1,
         "semantics diverged: bfs={bfs_count} sql={sql_count}"
     );
+    let cte_count = rt.block_on(run_sql_count(&ctx, &khop_recursive_cte_sql(3)));
+    assert_eq!(
+        cte_count, bfs_count,
+        "recursive CTE diverged from BFS semantics"
+    );
 
     let mut group = c.benchmark_group("parquet_e2e_10m_edges");
     group.sample_size(10);
@@ -212,12 +231,21 @@ fn bench_parquet_e2e(c: &mut Criterion) {
         });
     }
 
-    // 4. The relational baseline on the same Parquet data.
+    // 4. The relational baselines on the same Parquet data.
     for k in [2u32, 3] {
         let sql = khop_sql(k);
         group.bench_with_input(BenchmarkId::new("datafusion_sql", k), &sql, |b, sql| {
             b.iter(|| rt.block_on(run_sql_count(black_box(&ctx), black_box(sql))));
         });
+
+        let cte = khop_recursive_cte_sql(k);
+        group.bench_with_input(
+            BenchmarkId::new("datafusion_recursive_cte", k),
+            &cte,
+            |b, sql| {
+                b.iter(|| rt.block_on(run_sql_count(black_box(&ctx), black_box(sql))));
+            },
+        );
     }
 
     group.finish();

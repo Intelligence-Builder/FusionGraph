@@ -88,6 +88,22 @@ fn khop_sql(k: u32) -> String {
     )
 }
 
+/// The same reachability computed with a recursive CTE — the idiomatic SQL
+/// formulation for traversal (`DataFusion` executes `WITH RECURSIVE` natively).
+/// `UNION ALL` recursion enumerates *paths*; the outer `DISTINCT` reduces to
+/// nodes. Includes the start node, matching BFS semantics exactly.
+fn khop_recursive_cte_sql(k: u32) -> String {
+    format!(
+        "WITH RECURSIVE reach (n, depth) AS ( \
+           SELECT CAST(0 AS BIGINT) AS n, 0 AS depth \
+           UNION ALL \
+           SELECT CAST(e.dst AS BIGINT), r.depth + 1 \
+           FROM reach r JOIN edges e ON e.src = CAST(r.n AS BIGINT UNSIGNED) \
+           WHERE r.depth < {k} \
+         ) SELECT COUNT(DISTINCT n) FROM reach"
+    )
+}
+
 fn bench_khop(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
 
@@ -120,6 +136,26 @@ fn bench_khop(c: &mut Criterion) {
             (bfs_count - sql_count).abs() <= 1,
             "semantics diverged: bfs={bfs_count} sql={sql_count}"
         );
+        // The recursive CTE includes the start node: must match BFS exactly.
+        let cte_count: i64 = rt.block_on(async {
+            let batches = ctx
+                .sql(&khop_recursive_cte_sql(3))
+                .await
+                .expect("plan")
+                .collect()
+                .await
+                .expect("collect");
+            batches[0]
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .expect("count column")
+                .value(0)
+        });
+        assert_eq!(
+            cte_count, bfs_count,
+            "recursive CTE diverged from BFS semantics"
+        );
 
         let mut group = c.benchmark_group(format!("khop_n{nodes}_d{degree}"));
 
@@ -141,6 +177,24 @@ fn bench_khop(c: &mut Criterion) {
                     })
                 });
             });
+
+            let cte = khop_recursive_cte_sql(k);
+            group.bench_with_input(
+                BenchmarkId::new("datafusion_recursive_cte", k),
+                &cte,
+                |b, sql| {
+                    b.iter(|| {
+                        rt.block_on(async {
+                            ctx.sql(black_box(sql))
+                                .await
+                                .expect("plan")
+                                .collect()
+                                .await
+                                .expect("collect")
+                        })
+                    });
+                },
+            );
         }
 
         group.finish();

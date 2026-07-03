@@ -110,8 +110,15 @@ real operators: table scan → `CoalescePartitionsExec` → `CSRBuilderExec`
 | CSR BFS (kernel) | 2.5 µs | 6.8 µs |
 | `GraphTraversalExec` (operator, incl. Arrow output) | 7.9 µs | 12.4 µs |
 | DataFusion SQL, chained joins on **Parquet** | 10.7 ms | 27.2 ms |
+| DataFusion SQL, **recursive CTE** on Parquet (idiomatic) | 75.2 ms | 93.3 ms |
 | DataFusion SQL, chained joins on **Iceberg** | 91.9 ms | 220 ms |
-| **Speedup (operator vs. Parquet SQL)** | **~1,350x** | **~2,190x** |
+| **Speedup (operator vs. Parquet joins)** | **~1,350x** | **~2,190x** |
+| **Speedup (operator vs. recursive CTE)** | **~9,500x** | **~7,500x** |
+
+The recursive CTE row matters most: `WITH RECURSIVE` is what users actually
+write for traversal, and it is 3–7x slower than hand-tuned chained joins —
+so the operator's advantage over *idiomatic* SQL is four orders of magnitude.
+All baselines are semantics-checked against BFS at benchmark startup.
 
 One-time projection of all 10M edges: **204 ms** from Parquet, **174 ms**
 from Iceberg — it pays for itself in a handful of SQL queries. At 100M edges
@@ -237,7 +244,8 @@ Honest inventory, updated 2026-07.
 
 ### In progress / next (see [ROADMAP](docs/ROADMAP.md))
 - 🔜 crates.io publishing + `datafusion-contrib` proposal
-- 🔜 DuckPGQ / recursive-CTE comparative benchmarks
+  (publish-ready; see [docs/RELEASING.md](docs/RELEASING.md))
+- 🔜 DuckPGQ cross-engine comparison (recursive-CTE baseline ✅ done)
 
 ### Explicitly deferred (not in MVP scope)
 - ⏸️ Hand-written SIMD intrinsics — the `SimdBackend` trait exists with

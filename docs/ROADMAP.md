@@ -78,8 +78,13 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
       dependency-free; `gen::uniform` for the baseline shape.
 - [x] 100M-edge tier (R-MAT scale 23 × ef 12), opt-in via `FG_BENCH_LARGE=1`:
       near-full-graph BFS in 416 ms (~240M edges/sec examined).
-- [ ] Comparison targets: DataFusion recursive CTE (when available);
-      stretch: DuckPGQ on the same Parquet files
+- [x] Recursive-CTE baseline (2026-07-03): DataFusion 47 executes
+      `WITH RECURSIVE` natively; added to `traversal_vs_sql` and
+      `parquet_e2e`, semantics-asserted equal to BFS. At 10M edges on
+      Parquet: 75.2 ms (2-hop) / 93.3 ms (3-hop) — 3–7x slower than
+      hand-tuned chained joins, putting the operator ~7,500–9,500x ahead
+      of the *idiomatic* SQL formulation.
+- [ ] Stretch: DuckPGQ on the same Parquet files (cross-engine harness)
 
 ### M2 — SQL surface (core done 2026-07-03)
 - [x] `graph_traverse()` table function (UDTF) registered on `SessionContext`:
@@ -191,7 +196,10 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
       follow the runbook.
 - [ ] Propose to `datafusion-contrib` once published (distribution +
       ecosystem credibility — see §2 Guiding Principles #4)
-- [ ] DuckPGQ / recursive-CTE comparative benchmarks
+- [x] Recursive-CTE comparative benchmark — see M1 entry (operator is
+      ~7,500–9,500x faster than idiomatic `WITH RECURSIVE` at 10M edges)
+- [ ] DuckPGQ cross-engine comparison (needs a separate harness; DuckDB is
+      too heavy as a dev-dependency)
 
 ## 4. Explicitly Deferred (kill list until further notice)
 
