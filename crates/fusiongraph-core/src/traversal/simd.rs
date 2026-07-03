@@ -225,7 +225,12 @@ impl Avx2Backend {
     /// # Safety
     /// Caller must ensure AVX2 is available (checked in [`select_backend`]).
     #[target_feature(enable = "avx2")]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        // movemask returns i32 holding a 4-bit lane mask; sign loss impossible.
+        clippy::cast_sign_loss
+    )]
     unsafe fn filter_avx2(neighbors: &[u32], visited: &[u64], out: &mut Vec<u32>) {
         use std::arch::x86_64::{
             _mm256_and_si256, _mm256_castsi256_pd, _mm256_castsi256_si128, _mm256_cvtepu32_epi64,
