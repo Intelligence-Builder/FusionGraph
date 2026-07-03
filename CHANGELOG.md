@@ -6,6 +6,35 @@ All notable changes to FusionGraph are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Delta auto-compaction policy** (#40): `CompactionPolicy` +
+  `CsrGraph::should_compact` in core; `GraphCatalog::compact_if_needed`
+  atomically swaps the registry entry and replays mutations that raced the
+  compaction, so writers lose no data
+- **Direction-optimizing BFS in SQL** (#38): `GraphCatalog` memoizes a lazy
+  transpose per graph (`register_with_reverse` / `reverse`);
+  `GraphTraversalExec::with_reverse` enables DO-BFS on outgoing traversals
+  and executes `TraversalDirection::Incoming` as outgoing-on-transpose;
+  `graph_traverse` gains a direction argument:
+  `graph_traverse('g', 3, 5, 'in')` answers "who can reach node 3?"
+- **Weighted + temporal ontology projection** (#39, partial):
+  `weight_column` flows through `CsrBuildConfig` into weighted CSR storage
+  (NULLs default to 1.0); `register_ontology_graphs_as_of` filters edges by
+  `valid_from`/`valid_to` at an instant (string/UUID ID transforms remain
+  open)
+- **`GraphTableProvider` implemented** (#37): `new(ontology)` exposes the
+  canonical merged edge list `(source, target, label)`; `materialize(ctx)`
+  builds the merged CSR + scannable batches from all edge definitions;
+  `scan` serves the governed edge list (projection + limit pushdown);
+  `create_traversal_plan` returns a real `GraphTraversalExec`
+
+### Changed
+
+- `GraphTableProvider::new` signature: `(ontology, schema)` → `(ontology)`
+  (the schema is now the canonical edge list)
+- `graph_traverse` accepts 3–5 arguments (direction may take position 4 or 5)
+
 ## [0.1.0] — pending first publish
 
 Initial release of all four crates. Publish runbook: `docs/RELEASING.md`.

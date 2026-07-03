@@ -24,6 +24,30 @@ use crate::types::{GraphStatistics, NodeId};
 /// Default shard size: 64MB.
 pub const DEFAULT_SHARD_SIZE: usize = 64 * 1024 * 1024;
 
+/// Policy deciding when a graph's delta layer should be compacted into the
+/// base CSR (see [`CsrGraph::compact`]).
+///
+/// The delta slow path costs ~74x over the clean fast path (see the
+/// `bfs_delta` bench), so bounding delta growth directly bounds traversal
+/// latency. A graph should be compacted when **either** threshold trips.
+#[derive(Debug, Clone, Copy)]
+pub struct CompactionPolicy {
+    /// Compact when total delta entries (insertions + tombstones) reach this.
+    pub max_delta_entries: usize,
+    /// Compact when delta entries reach this fraction of base edges
+    /// (e.g. `0.01` = 1%). Ignored while the base layer is empty.
+    pub max_delta_ratio: f64,
+}
+
+impl Default for CompactionPolicy {
+    fn default() -> Self {
+        Self {
+            max_delta_entries: 100_000,
+            max_delta_ratio: 0.01,
+        }
+    }
+}
+
 /// A CSR-based graph with micro-sharding support.
 #[derive(Debug)]
 pub struct CsrGraph {
@@ -85,10 +109,10 @@ impl CsrGraph {
         self.shards.len()
     }
 
-    /// Returns a reference to the shards.
-    #[cfg(test)]
+    /// Returns the base-layer shards (read-only view of CSR storage).
     #[inline]
-    pub(crate) fn shards(&self) -> &[Arc<CsrShard>] {
+    #[must_use]
+    pub fn shards(&self) -> &[Arc<CsrShard>] {
         &self.shards
     }
 
@@ -204,6 +228,23 @@ impl CsrGraph {
         let shard_memory: usize = self.shards.iter().map(|s| s.memory_usage()).sum();
         let delta_memory = self.delta.memory_usage();
         shard_memory + delta_memory
+    }
+
+    /// Returns whether the delta layer has grown past the policy's
+    /// thresholds and the graph should be [`compact`](Self::compact)ed.
+    ///
+    /// Cheap to call on every write batch: two atomic-ish length reads.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)] // ratio check tolerates rounding
+    pub fn should_compact(&self, policy: &CompactionPolicy) -> bool {
+        let delta_len = self.delta.len();
+        if delta_len == 0 {
+            return false;
+        }
+        if delta_len >= policy.max_delta_entries {
+            return true;
+        }
+        self.edge_count > 0 && delta_len as f64 >= self.edge_count as f64 * policy.max_delta_ratio
     }
 
     /// Compacts the delta layer into a new base-only graph.
@@ -595,6 +636,37 @@ mod tests {
         let shard = &compacted.shards()[shard_idx];
         let (start, _) = shard.neighbor_range(offset);
         assert_eq!(shard.weight(start), Some(2.5));
+    }
+
+    #[test]
+    fn should_compact_respects_thresholds() {
+        let graph = CsrGraph::from_edges(&[(0, 1), (1, 2), (2, 3), (3, 4)]); // 4 edges
+        let policy = CompactionPolicy {
+            max_delta_entries: 3,
+            max_delta_ratio: 0.5, // 2 of 4 edges
+        };
+
+        // Empty delta: never compact.
+        assert!(!graph.should_compact(&policy));
+
+        // One entry: below both thresholds.
+        graph.delta().delete(NodeId::new(0), NodeId::new(1));
+        assert!(!graph.should_compact(&policy));
+
+        // Two entries: hits the ratio threshold (2 >= 4 * 0.5).
+        graph.delta().insert(
+            NodeId::new(4),
+            NodeId::new(5),
+            crate::types::EdgeData::default(),
+        );
+        assert!(graph.should_compact(&policy));
+
+        // Entry-count threshold alone also trips.
+        let strict = CompactionPolicy {
+            max_delta_entries: 2,
+            max_delta_ratio: 10.0,
+        };
+        assert!(graph.should_compact(&strict));
     }
 
     // =========================================================================

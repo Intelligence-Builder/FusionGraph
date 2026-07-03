@@ -56,6 +56,9 @@ pub struct CsrBuildConfig {
     /// downstream operators (default: `None`, graph is dropped after the
     /// statistics batch is emitted).
     pub graph_sink: Option<GraphSink>,
+    /// Optional name of a `Float32` weight column; when set, the CSR is
+    /// built weighted (default: `None`, unweighted).
+    pub weight_column: Option<String>,
 }
 
 impl Default for CsrBuildConfig {
@@ -67,6 +70,7 @@ impl Default for CsrBuildConfig {
             source_column: "source".to_string(),
             target_column: "target".to_string(),
             graph_sink: None,
+            weight_column: None,
         }
     }
 }
@@ -219,6 +223,8 @@ struct CsrBuildStream {
     input_schema: SchemaRef,
     /// Collected edges.
     edges: Vec<(u64, u64)>,
+    /// Collected weights (parallel to `edges`; only when configured).
+    weights: Vec<f32>,
     /// Whether we've finished building.
     finished: bool,
 }
@@ -236,6 +242,7 @@ impl CsrBuildStream {
             schema,
             input_schema,
             edges: Vec::new(),
+            weights: Vec::new(),
             finished: false,
         }
     }
@@ -308,6 +315,29 @@ impl CsrBuildStream {
                 ))
             })?;
 
+        let weights = match &self.config.weight_column {
+            Some(name) => {
+                let idx = self.input_schema.index_of(name).map_err(|_| {
+                    DataFusionError::Execution(format!(
+                        "Weight column '{name}' not found in input schema"
+                    ))
+                })?;
+                Some(
+                    batch
+                        .column(idx)
+                        .as_any()
+                        .downcast_ref::<arrow::array::Float32Array>()
+                        .ok_or_else(|| {
+                            DataFusionError::Execution(format!(
+                                "Weight column '{name}' must be Float32"
+                            ))
+                        })?
+                        .clone(),
+                )
+            }
+            None => None,
+        };
+
         for i in 0..batch.num_rows() {
             if !sources.is_null(i) && !targets.is_null(i) {
                 self.enforce_memory_limit(self.edges.len().checked_add(1).ok_or_else(|| {
@@ -316,6 +346,11 @@ impl CsrBuildStream {
                     )
                 })?)?;
                 self.edges.push((sources.value(i), targets.value(i)));
+                if let Some(w) = &weights {
+                    // NULL weights default to 1.0 (matches EdgeData semantics).
+                    self.weights
+                        .push(if w.is_null(i) { 1.0 } else { w.value(i) });
+                }
             }
         }
 
@@ -325,9 +360,19 @@ impl CsrBuildStream {
     fn build_csr(&mut self) -> Result<RecordBatch, DataFusionError> {
         let start = std::time::Instant::now();
 
-        let graph = CsrBuilder::new()
-            .with_shard_size(self.config.shard_size)
-            .with_edges(self.edges.drain(..))
+        let builder = CsrBuilder::new().with_shard_size(self.config.shard_size);
+        let builder = if self.config.weight_column.is_some() {
+            let weights = std::mem::take(&mut self.weights);
+            builder.with_weighted_edges(
+                self.edges
+                    .drain(..)
+                    .zip(weights)
+                    .map(|((f, t), w)| (f, t, w)),
+            )
+        } else {
+            builder.with_edges(self.edges.drain(..))
+        };
+        let graph = builder
             .build()
             .map_err(|e| DataFusionError::Execution(format!("CSR build failed: {e}")))?;
 

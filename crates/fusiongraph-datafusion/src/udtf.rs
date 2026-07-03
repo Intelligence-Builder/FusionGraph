@@ -16,6 +16,11 @@
 //! 2. `start_node` (integer) — node ID to start the BFS from
 //! 3. `max_hops` (integer) — maximum traversal depth
 //! 4. `max_nodes` (integer, optional) — cap on visited nodes
+//! 5. `direction` (string, optional): `'out'` (default) or `'in'`. `'in'`
+//!    traverses **incoming** edges ("who can reach X?") over the memoized
+//!    transpose (built on first use). A string in position 4 is accepted as
+//!    the direction, so `graph_traverse('g', 0, 3, 'in')` works without a
+//!    `max_nodes`.
 //!
 //! Output schema matches [`GraphTraversalExec`](crate::GraphTraversalExec):
 //! `node_id UInt64, depth UInt32, path List<UInt64>` (path is currently NULL
@@ -23,7 +28,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -38,8 +43,8 @@ use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionContext;
 
-use fusiongraph_core::traversal::TraversalSpec;
-use fusiongraph_core::{CsrGraph, NodeId};
+use fusiongraph_core::traversal::{TraversalDirection, TraversalSpec};
+use fusiongraph_core::{CompactionPolicy, CsrGraph, NodeId};
 
 use crate::exec::GraphTraversalExec;
 
@@ -50,7 +55,23 @@ use crate::exec::GraphTraversalExec;
 /// catalog once per [`SessionContext`] via [`register_graph_traverse`].
 #[derive(Debug, Default)]
 pub struct GraphCatalog {
-    graphs: RwLock<HashMap<String, Arc<CsrGraph>>>,
+    graphs: RwLock<HashMap<String, Arc<GraphEntry>>>,
+}
+
+/// A registered graph plus its lazily-built, memoized transpose.
+#[derive(Debug)]
+struct GraphEntry {
+    forward: Arc<CsrGraph>,
+    reverse: OnceLock<Arc<CsrGraph>>,
+}
+
+impl GraphEntry {
+    fn new(forward: Arc<CsrGraph>) -> Arc<Self> {
+        Arc::new(Self {
+            forward,
+            reverse: OnceLock::new(),
+        })
+    }
 }
 
 impl GraphCatalog {
@@ -70,7 +91,111 @@ impl GraphCatalog {
         self.graphs
             .write()
             .expect("graph catalog lock poisoned")
-            .insert(name.into(), graph)
+            .insert(name.into(), GraphEntry::new(graph))
+            .map(|e| Arc::clone(&e.forward))
+    }
+
+    /// Registers a graph together with its pre-built transpose, enabling
+    /// direction-optimizing BFS and incoming traversal without the lazy
+    /// transpose cost on first use.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned (a writer panicked).
+    pub fn register_with_reverse(
+        &self,
+        name: impl Into<String>,
+        forward: Arc<CsrGraph>,
+        reverse: Arc<CsrGraph>,
+    ) {
+        let entry = GraphEntry::new(forward);
+        let _ = entry.reverse.set(reverse);
+        self.graphs
+            .write()
+            .expect("graph catalog lock poisoned")
+            .insert(name.into(), entry);
+    }
+
+    fn entry(&self, name: &str) -> Option<Arc<GraphEntry>> {
+        self.graphs
+            .read()
+            .expect("graph catalog lock poisoned")
+            .get(name)
+            .map(Arc::clone)
+    }
+
+    /// Returns the transposed graph for `name`, building and memoizing it
+    /// on first use. Returns `None` if no graph is registered under `name`.
+    ///
+    /// The transpose snapshots live delta mutations at build time; graphs
+    /// mutated afterwards should be re-registered (or compacted via
+    /// [`Self::compact_if_needed`], which resets the memoized transpose).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if building the transpose fails (CSR capacity).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned (a writer panicked).
+    pub fn reverse(&self, name: &str) -> Result<Option<Arc<CsrGraph>>> {
+        let Some(entry) = self.entry(name) else {
+            return Ok(None);
+        };
+        if let Some(rev) = entry.reverse.get() {
+            return Ok(Some(Arc::clone(rev)));
+        }
+        // Build outside any lock; a concurrent builder may win the race,
+        // in which case our copy is dropped.
+        let built = Arc::new(
+            entry
+                .forward
+                .transpose()
+                .map_err(|e| DataFusionError::External(Box::new(e)))?,
+        );
+        let _ = entry.reverse.set(Arc::clone(&built));
+        Ok(Some(Arc::clone(entry.reverse.get().unwrap_or(&built))))
+    }
+
+    /// Compacts the named graph if `policy` says its delta layer has grown
+    /// too large, atomically swapping the registry entry (which also resets
+    /// the memoized transpose). Returns whether compaction ran.
+    ///
+    /// Mutations that land in the old graph's delta *during* compaction are
+    /// replayed into the new graph's delta before the swap, so writers
+    /// racing a compaction lose no data (they may observe the old graph
+    /// briefly after the swap if they hold a stale `Arc`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if compaction fails (CSR capacity).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned (a writer panicked).
+    pub fn compact_if_needed(&self, name: &str, policy: &CompactionPolicy) -> Result<bool> {
+        let Some(entry) = self.entry(name) else {
+            return Ok(false);
+        };
+        if !entry.forward.should_compact(policy) {
+            return Ok(false);
+        }
+
+        let compacted = entry
+            .forward
+            .compact()
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        // Replay mutations that raced the compaction into the new delta.
+        for ((from, to), data) in entry.forward.delta().drain_insertions() {
+            compacted.delta().insert(from, to, data);
+        }
+        for (from, to) in entry.forward.delta().drain_deletions() {
+            compacted.delta().delete(from, to);
+        }
+
+        self.register(name.to_string(), Arc::new(compacted));
+        Ok(true)
     }
 
     /// Returns the graph registered under `name`, if any.
@@ -80,11 +205,7 @@ impl GraphCatalog {
     /// Panics if the internal lock is poisoned (a writer panicked).
     #[must_use]
     pub fn get(&self, name: &str) -> Option<Arc<CsrGraph>> {
-        self.graphs
-            .read()
-            .expect("graph catalog lock poisoned")
-            .get(name)
-            .map(Arc::clone)
+        self.entry(name).map(|e| Arc::clone(&e.forward))
     }
 
     /// Removes and returns the graph registered under `name`.
@@ -97,6 +218,7 @@ impl GraphCatalog {
             .write()
             .expect("graph catalog lock poisoned")
             .remove(name)
+            .map(|e| Arc::clone(&e.forward))
     }
 
     /// Returns the names of all registered graphs (sorted).
@@ -171,10 +293,10 @@ impl GraphTraverseUdtf {
 
 impl TableFunctionImpl for GraphTraverseUdtf {
     fn call(&self, args: &[Expr]) -> Result<Arc<dyn TableProvider>> {
-        if !(3..=4).contains(&args.len()) {
+        if !(3..=5).contains(&args.len()) {
             return Err(DataFusionError::Plan(format!(
-                "graph_traverse expects 3 or 4 arguments \
-                 (graph_name, start_node, max_hops [, max_nodes]), got {}",
+                "graph_traverse expects 3 to 5 arguments \
+                 (graph_name, start_node, max_hops [, max_nodes] [, direction]), got {}",
                 args.len()
             )));
         }
@@ -182,14 +304,45 @@ impl TableFunctionImpl for GraphTraverseUdtf {
         let graph_name = Self::parse_string(args.first(), "1 (graph_name)")?;
         let start_node = Self::parse_u64(args.get(1), "2 (start_node)")?;
         let max_hops = Self::parse_u64(args.get(2), "3 (max_hops)")?;
-        let max_nodes = if args.len() == 4 {
-            Some(
-                usize::try_from(Self::parse_u64(args.get(3), "4 (max_nodes)")?).map_err(|_| {
-                    DataFusionError::Plan("graph_traverse: max_nodes exceeds usize".to_string())
-                })?,
-            )
-        } else {
-            None
+
+        // Position 4 is `max_nodes` (integer) or `direction` (string).
+        let mut max_nodes = None;
+        let mut direction_arg: Option<String> = None;
+        if let Some(fourth) = args.get(3) {
+            if matches!(
+                fourth,
+                Expr::Literal(ScalarValue::Utf8(_) | ScalarValue::LargeUtf8(_))
+            ) {
+                direction_arg = Some(Self::parse_string(Some(fourth), "4 (direction)")?);
+            } else {
+                max_nodes = Some(
+                    usize::try_from(Self::parse_u64(Some(fourth), "4 (max_nodes)")?).map_err(
+                        |_| {
+                            DataFusionError::Plan(
+                                "graph_traverse: max_nodes exceeds usize".to_string(),
+                            )
+                        },
+                    )?,
+                );
+            }
+        }
+        if let Some(fifth) = args.get(4) {
+            if direction_arg.is_some() {
+                return Err(DataFusionError::Plan(
+                    "graph_traverse: direction was already given in position 4".to_string(),
+                ));
+            }
+            direction_arg = Some(Self::parse_string(Some(fifth), "5 (direction)")?);
+        }
+
+        let direction = match direction_arg.as_deref() {
+            None | Some("out" | "outgoing") => TraversalDirection::Outgoing,
+            Some("in" | "incoming") => TraversalDirection::Incoming,
+            Some(other) => {
+                return Err(DataFusionError::Plan(format!(
+                    "graph_traverse: direction must be 'out' or 'in', got '{other}'"
+                )));
+            }
         };
 
         let graph = self.catalog.get(&graph_name).ok_or_else(|| {
@@ -200,6 +353,17 @@ impl TableFunctionImpl for GraphTraverseUdtf {
             ))
         })?;
 
+        // Incoming traversal needs the transpose (built + memoized on first
+        // use). Outgoing traversal picks it up opportunistically if it is
+        // already resident, enabling direction-optimizing BFS for free.
+        let reverse = if direction == TraversalDirection::Incoming {
+            self.catalog.reverse(&graph_name)?
+        } else {
+            self.catalog
+                .entry(&graph_name)
+                .and_then(|e| e.reverse.get().map(Arc::clone))
+        };
+
         let max_depth = u32::try_from(max_hops).map_err(|_| {
             DataFusionError::Plan("graph_traverse: max_hops exceeds u32".to_string())
         })?;
@@ -208,10 +372,11 @@ impl TableFunctionImpl for GraphTraverseUdtf {
             start: vec![NodeId::new(start_node)],
             max_depth,
             max_nodes,
+            direction,
             ..TraversalSpec::default()
         };
 
-        Ok(Arc::new(TraversalTable::new(graph, spec)))
+        Ok(Arc::new(TraversalTable::new(graph, reverse, spec)))
     }
 }
 
@@ -220,16 +385,18 @@ impl TableFunctionImpl for GraphTraverseUdtf {
 #[derive(Debug)]
 struct TraversalTable {
     graph: Arc<CsrGraph>,
+    reverse: Option<Arc<CsrGraph>>,
     spec: TraversalSpec,
     schema: SchemaRef,
 }
 
 impl TraversalTable {
-    fn new(graph: Arc<CsrGraph>, spec: TraversalSpec) -> Self {
+    fn new(graph: Arc<CsrGraph>, reverse: Option<Arc<CsrGraph>>, spec: TraversalSpec) -> Self {
         // Instantiate once to obtain the output schema.
         let schema = GraphTraversalExec::new(Arc::clone(&graph), spec.clone()).schema();
         Self {
             graph,
+            reverse,
             spec,
             schema,
         }
@@ -257,10 +424,11 @@ impl TableProvider for TraversalTable {
         _filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let mut plan: Arc<dyn ExecutionPlan> = Arc::new(GraphTraversalExec::new(
-            Arc::clone(&self.graph),
-            self.spec.clone(),
-        ));
+        let mut exec = GraphTraversalExec::new(Arc::clone(&self.graph), self.spec.clone());
+        if let Some(reverse) = &self.reverse {
+            exec = exec.with_reverse(Arc::clone(reverse));
+        }
+        let mut plan: Arc<dyn ExecutionPlan> = Arc::new(exec);
 
         if let Some(indices) = projection {
             let exprs = indices
@@ -402,7 +570,7 @@ mod tests {
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("expects 3 or 4 arguments"), "got: {err}");
+        assert!(err.contains("expects 3 to 5 arguments"), "got: {err}");
     }
 
     #[tokio::test]
@@ -430,6 +598,148 @@ mod tests {
             err.contains("must be a non-negative integer literal"),
             "got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn sql_incoming_direction_finds_ancestors() {
+        let (ctx, _catalog) = setup();
+
+        // Who can reach node 3? In 0 -> 1 -> 2 -> 3 (+1 -> 3): everyone.
+        let batches = ctx
+            .sql("SELECT node_id, depth FROM graph_traverse('g', 3, 5, 'in') ORDER BY node_id")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        let batch = &batches[0];
+        assert_eq!(batch.num_rows(), 4);
+        let node_ids = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap();
+        assert_eq!(node_ids.values(), &[0, 1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn sql_direction_as_fifth_argument_with_max_nodes() {
+        let (ctx, _catalog) = setup();
+
+        let batches = ctx
+            .sql("SELECT node_id FROM graph_traverse('g', 3, 5, 2, 'in')")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        let rows: usize = batches.iter().map(arrow_array::RecordBatch::num_rows).sum();
+        assert_eq!(rows, 2, "max_nodes caps the incoming traversal");
+    }
+
+    #[tokio::test]
+    async fn sql_invalid_direction_errors() {
+        let (ctx, _catalog) = setup();
+
+        let err = ctx
+            .sql("SELECT * FROM graph_traverse('g', 0, 2, 'sideways')")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("direction must be 'out' or 'in'"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn outgoing_result_is_unchanged_with_resident_reverse() {
+        // With the transpose resident, outgoing queries may use DO-BFS;
+        // results must be identical to the plain kernel.
+        let (ctx, catalog) = setup();
+        let plain = ctx
+            .sql("SELECT node_id FROM graph_traverse('g', 0, 2) ORDER BY node_id")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        // Force the transpose to become resident.
+        catalog.reverse("g").unwrap().unwrap();
+        let hybrid = ctx
+            .sql("SELECT node_id FROM graph_traverse('g', 0, 2) ORDER BY node_id")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        assert_eq!(plain[0].num_rows(), hybrid[0].num_rows());
+        assert_eq!(
+            plain[0]
+                .column(0)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap()
+                .values(),
+            hybrid[0]
+                .column(0)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap()
+                .values()
+        );
+    }
+
+    #[test]
+    fn register_with_reverse_prebuilds_transpose() {
+        let catalog = GraphCatalog::new();
+        let graph = test_graph();
+        let reverse = Arc::new(graph.transpose().unwrap());
+        catalog.register_with_reverse("g", graph, reverse);
+
+        // Available without lazy construction.
+        let entry = catalog.entry("g").unwrap();
+        assert!(entry.reverse.get().is_some());
+    }
+
+    #[test]
+    fn compact_if_needed_swaps_entry_and_preserves_topology() {
+        use fusiongraph_core::types::EdgeData;
+
+        let catalog = GraphCatalog::new();
+        catalog.register("g", test_graph()); // 4 base edges
+
+        // Two delta mutations against a permissive policy: no compaction.
+        let graph = catalog.get("g").unwrap();
+        graph
+            .delta()
+            .insert(NodeId::new(3), NodeId::new(4), EdgeData::default());
+        graph.delta().delete(NodeId::new(0), NodeId::new(1));
+
+        let lax = CompactionPolicy {
+            max_delta_entries: 100,
+            max_delta_ratio: 10.0,
+        };
+        assert!(!catalog.compact_if_needed("g", &lax).unwrap());
+
+        // Strict policy: compaction runs and the entry is swapped.
+        let strict = CompactionPolicy {
+            max_delta_entries: 1,
+            max_delta_ratio: 10.0,
+        };
+        assert!(catalog.compact_if_needed("g", &strict).unwrap());
+
+        let compacted = catalog.get("g").unwrap();
+        assert!(compacted.delta().is_empty(), "delta merged into base");
+        assert!(compacted.has_edge(NodeId::new(3), NodeId::new(4)));
+        assert!(!compacted.has_edge(NodeId::new(0), NodeId::new(1)));
+
+        // Unknown graphs are a no-op, not an error.
+        assert!(!catalog.compact_if_needed("missing", &strict).unwrap());
     }
 
     #[test]

@@ -82,6 +82,6 @@ pub use error::DataFusionError;
 pub use exec::{new_graph_sink, CSRBuilderExec, CsrBuildConfig, GraphSink, GraphTraversalExec};
 #[cfg(feature = "iceberg")]
 pub use iceberg_ext::{register_iceberg_table, register_iceberg_table_snapshot};
-pub use loader::register_ontology_graphs;
+pub use loader::{register_ontology_graphs, register_ontology_graphs_as_of};
 pub use provider::GraphTableProvider;
 pub use udtf::{register_graph_traverse, GraphCatalog};

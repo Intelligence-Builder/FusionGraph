@@ -51,9 +51,11 @@ pub fn graph_name(ontology: &Ontology, edge: &EdgeDefinition) -> String {
 ///
 /// Returns the registered graph names in edge-definition order.
 ///
+/// Supported [`EdgeDefinition`] features: `weight_column` (projected into a
+/// weighted CSR, cast to `Float32`, NULLs default to 1.0) and temporal
+/// validity columns (see [`register_ontology_graphs_as_of`]).
+///
 /// Current limitations (documented, enforced by clear errors where possible):
-/// - `weight_column` is ignored (CSR build is unweighted today)
-/// - temporal validity columns are ignored
 /// - string/UUID ID transforms are not applied; IDs must be integers
 ///
 /// # Errors
@@ -66,6 +68,28 @@ pub async fn register_ontology_graphs(
     ontology: &Ontology,
     catalog: &Arc<GraphCatalog>,
 ) -> Result<Vec<String>> {
+    register_ontology_graphs_as_of(ctx, ontology, catalog, None).await
+}
+
+/// [`register_ontology_graphs`] with temporal filtering.
+///
+/// When `as_of` is `Some`, edges whose definition declares
+/// `valid_from_column` / `valid_to_column` are filtered to those valid at
+/// the given instant: `valid_from <= as_of AND (valid_to IS NULL OR
+/// valid_to > as_of)`. The literal must be comparable to the columns'
+/// types under `DataFusion` coercion (e.g. an ISO-8601 string against
+/// `Utf8` or `Timestamp` columns). Edges without temporal columns are
+/// unaffected.
+///
+/// # Errors
+///
+/// See [`register_ontology_graphs`].
+pub async fn register_ontology_graphs_as_of(
+    ctx: &SessionContext,
+    ontology: &Ontology,
+    catalog: &Arc<GraphCatalog>,
+    as_of: Option<&str>,
+) -> Result<Vec<String>> {
     ontology
         .validate_or_error()
         .map_err(|e| DataFusionError::Plan(format!("ontology validation failed: {e}")))?;
@@ -73,7 +97,7 @@ pub async fn register_ontology_graphs(
     let mut registered = Vec::with_capacity(ontology.edges.len());
 
     for edge in &ontology.edges {
-        let graph = build_edge_graph(ctx, edge).await.map_err(|e| {
+        let graph = build_edge_graph(ctx, edge, as_of).await.map_err(|e| {
             DataFusionError::Context(
                 format!(
                     "while projecting edge '{}' from table '{}'",
@@ -95,14 +119,37 @@ pub async fn register_ontology_graphs(
 async fn build_edge_graph(
     ctx: &SessionContext,
     edge: &EdgeDefinition,
+    as_of: Option<&str>,
 ) -> Result<Arc<fusiongraph_core::CsrGraph>> {
-    // Selective projection: only the two ID columns leave the scan. Casting
-    // to UInt64 accepts the common lakehouse integer ID types (Int32/Int64/
-    // UInt32/UInt64); invalid values surface as cast errors at execution.
-    let df = ctx.table(edge.source.as_str()).await?.select(vec![
+    let mut df = ctx.table(edge.source.as_str()).await?;
+
+    // Temporal filtering: only edges valid at `as_of`.
+    if let Some(instant) = as_of {
+        use datafusion::logical_expr::lit;
+        if let Some(from_col) = &edge.valid_from_column {
+            df = df.filter(col(from_col.as_str()).lt_eq(lit(instant)))?;
+        }
+        if let Some(to_col) = &edge.valid_to_column {
+            df = df.filter(
+                col(to_col.as_str())
+                    .is_null()
+                    .or(col(to_col.as_str()).gt(lit(instant))),
+            )?;
+        }
+    }
+
+    // Selective projection: only the columns the kernel needs leave the
+    // scan. Casting to UInt64 accepts the common lakehouse integer ID types
+    // (Int32/Int64/UInt32/UInt64); invalid values surface as cast errors at
+    // execution. Weights are cast to the CSR's Float32 storage.
+    let mut projection = vec![
         cast(col(edge.from_column.as_str()), DataType::UInt64).alias(edge.from_column.as_str()),
         cast(col(edge.to_column.as_str()), DataType::UInt64).alias(edge.to_column.as_str()),
-    ])?;
+    ];
+    if let Some(weight) = &edge.weight_column {
+        projection.push(cast(col(weight.as_str()), DataType::Float32).alias(weight.as_str()));
+    }
+    let df = df.select(projection)?;
 
     let scan = df.create_physical_plan().await?;
     let coalesced = Arc::new(CoalescePartitionsExec::new(scan));
@@ -112,6 +159,7 @@ async fn build_edge_graph(
         source_column: edge.from_column.clone(),
         target_column: edge.to_column.clone(),
         graph_sink: Some(Arc::clone(&sink)),
+        weight_column: edge.weight_column.clone(),
         ..CsrBuildConfig::default()
     };
     let builder = Arc::new(CSRBuilderExec::new(coalesced, config));
@@ -290,5 +338,144 @@ to_column = "policy_id"
         let mut ontology = Ontology::from_toml(ONTOLOGY_TOML).unwrap();
         ontology.ontology.name = String::new();
         assert_eq!(graph_name(&ontology, &ontology.edges[0]), "CAN_ASSUME");
+    }
+
+    #[tokio::test]
+    async fn weighted_edges_project_into_weighted_csr() {
+        use arrow_array::Float64Array;
+
+        let ctx = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("src", DataType::Int64, false),
+            Field::new("dst", DataType::Int64, false),
+            Field::new("score", DataType::Float64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int64Array::from(vec![0i64, 1])),
+                Arc::new(Int64Array::from(vec![1i64, 2])),
+                Arc::new(Float64Array::from(vec![2.5f64, 0.5])),
+            ],
+        )
+        .unwrap();
+        let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        ctx.register_table("scored_edges", Arc::new(table)).unwrap();
+
+        let ontology = Ontology::from_toml(
+            r#"
+[ontology]
+name = "w"
+
+[[nodes]]
+label = "N"
+source = "scored_edges"
+id_column = "src"
+
+[[edges]]
+label = "SCORED"
+source = "scored_edges"
+from_node = "N"
+from_column = "src"
+to_node = "N"
+to_column = "dst"
+weight_column = "score"
+"#,
+        )
+        .unwrap();
+
+        let catalog = GraphCatalog::new();
+        register_ontology_graphs(&ctx, &ontology, &catalog)
+            .await
+            .unwrap();
+
+        let graph = catalog.get("w.SCORED").unwrap();
+        assert_eq!(graph.edge_count(), 2);
+        assert!(
+            graph.shards().iter().any(|s| s.has_weights()),
+            "CSR should carry weights"
+        );
+        // Weight of edge 0 -> 1 (first edge of node 0) survives projection.
+        let (shard_idx, offset) = graph
+            .global_to_shard(fusiongraph_core::NodeId::new(0))
+            .unwrap();
+        let shard = &graph.shards()[shard_idx];
+        let (start, _) = shard.neighbor_range(offset);
+        assert_eq!(shard.weight(start), Some(2.5));
+    }
+
+    #[tokio::test]
+    async fn temporal_as_of_filters_edges() {
+        use arrow_array::StringArray;
+
+        let ctx = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("src", DataType::Int64, false),
+            Field::new("dst", DataType::Int64, false),
+            Field::new("valid_from", DataType::Utf8, false),
+            Field::new("valid_to", DataType::Utf8, true),
+        ]));
+        // Edge 0->1 valid all of 2025; edge 1->2 valid from 2026 onwards.
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int64Array::from(vec![0i64, 1])),
+                Arc::new(Int64Array::from(vec![1i64, 2])),
+                Arc::new(StringArray::from(vec!["2025-01-01", "2026-01-01"])),
+                Arc::new(StringArray::from(vec![Some("2026-01-01"), None])),
+            ],
+        )
+        .unwrap();
+        let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        ctx.register_table("grants", Arc::new(table)).unwrap();
+
+        let ontology = Ontology::from_toml(
+            r#"
+[ontology]
+name = "t"
+
+[[nodes]]
+label = "N"
+source = "grants"
+id_column = "src"
+
+[[edges]]
+label = "GRANTS"
+source = "grants"
+from_node = "N"
+from_column = "src"
+to_node = "N"
+to_column = "dst"
+valid_from_column = "valid_from"
+valid_to_column = "valid_to"
+"#,
+        )
+        .unwrap();
+
+        // As of mid-2025: only 0 -> 1 is valid.
+        let catalog = GraphCatalog::new();
+        register_ontology_graphs_as_of(&ctx, &ontology, &catalog, Some("2025-06-15"))
+            .await
+            .unwrap();
+        assert_eq!(catalog.get("t.GRANTS").unwrap().edge_count(), 1);
+
+        // As of mid-2026: only 1 -> 2 (0 -> 1 expired).
+        let catalog2 = GraphCatalog::new();
+        register_ontology_graphs_as_of(&ctx, &ontology, &catalog2, Some("2026-06-15"))
+            .await
+            .unwrap();
+        let g = catalog2.get("t.GRANTS").unwrap();
+        assert_eq!(g.edge_count(), 1);
+        assert!(g.has_edge(
+            fusiongraph_core::NodeId::new(1),
+            fusiongraph_core::NodeId::new(2)
+        ));
+
+        // Without as_of: all edges included.
+        let catalog3 = GraphCatalog::new();
+        register_ontology_graphs(&ctx, &ontology, &catalog3)
+            .await
+            .unwrap();
+        assert_eq!(catalog3.get("t.GRANTS").unwrap().edge_count(), 2);
     }
 }

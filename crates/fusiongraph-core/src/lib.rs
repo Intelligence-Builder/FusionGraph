@@ -17,7 +17,7 @@ pub mod gen;
 pub mod traversal;
 pub mod types;
 
-pub use csr::{CsrGraph, CsrShard};
+pub use csr::{CompactionPolicy, CsrGraph, CsrShard};
 pub use delta::DeltaLayer;
 pub use error::GraphError;
 pub use traversal::{bfs, TraversalResult};
