@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # QA gate on both architectures:
+  # - ubuntu-latest is x86_64 with AVX2 -> the SIMD equivalence tests
+  #   (platform_backend_matches_scalar_reference) validate the AVX2 kernel
+  # - macos-latest is aarch64 -> the same tests validate the NEON kernel
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (all targets, warnings are errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Report SIMD backend under test
+        run: cargo test -p fusiongraph-core --lib traversal::simd -- --nocapture
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Check without default features
+        run: cargo check -p fusiongraph-datafusion --no-default-features
+
+  # Benchmarks compile on every PR; regressions are caught by compilation
+  # drift here and measured manually / on demand (criterion needs quiet
+  # hardware for meaningful numbers, which shared runners are not).
+  bench-build:
+    name: benches compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Build benches
+        run: cargo bench --workspace --no-run

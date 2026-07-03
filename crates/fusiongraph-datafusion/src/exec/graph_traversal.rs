@@ -88,7 +88,9 @@ impl GraphTraversalExec {
 
         if self.spec.direction != TraversalDirection::Outgoing {
             return Err(datafusion::error::DataFusionError::NotImplemented(format!(
-                "GraphTraversalExec only supports outgoing traversal, got {:?}",
+                "GraphTraversalExec only supports outgoing traversal, got {:?}; \
+                 for incoming traversal build the reverse topology with \
+                 CsrGraph::transpose() and traverse it outgoing",
                 self.spec.direction
             )));
         }

@@ -121,6 +121,19 @@ impl DeltaLayer {
         insertion_size + deletion_size + std::mem::size_of::<Self>()
     }
 
+    /// Returns a snapshot of all insertions without draining them.
+    pub fn snapshot_insertions(&self) -> Vec<((NodeId, NodeId), EdgeData)> {
+        self.insertions
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().clone()))
+            .collect()
+    }
+
+    /// Returns a snapshot of all deletions without draining them.
+    pub fn snapshot_deletions(&self) -> Vec<(NodeId, NodeId)> {
+        self.deletions.iter().map(|entry| *entry).collect()
+    }
+
     /// Drains all insertions for compaction.
     pub fn drain_insertions(&self) -> Vec<((NodeId, NodeId), EdgeData)> {
         let entries: Vec<_> = self

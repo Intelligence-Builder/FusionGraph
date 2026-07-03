@@ -114,6 +114,13 @@ impl CsrShard {
         self.col_indices.get(idx).copied()
     }
 
+    /// Returns whether this shard stores edge weights.
+    #[inline]
+    #[must_use]
+    pub fn has_weights(&self) -> bool {
+        self.weights.is_some()
+    }
+
     /// Returns the edge weight at the given position.
     #[inline]
     pub fn weight(&self, idx: usize) -> Option<f32> {

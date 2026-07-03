@@ -153,6 +153,18 @@ fn bench_delta_path(c: &mut Criterion) {
         b.iter(|| bfs(black_box(&dirty), black_box(NodeId::new(0)), black_box(3)));
     });
 
+    // Compaction merges the delta into a new base, restoring the fast path.
+    let compacted = dirty.compact().expect("compaction succeeds");
+    group.bench_function("fast_path_after_compact", |b| {
+        b.iter(|| {
+            bfs(
+                black_box(&compacted),
+                black_box(NodeId::new(0)),
+                black_box(3),
+            )
+        });
+    });
+
     group.finish();
 }
 

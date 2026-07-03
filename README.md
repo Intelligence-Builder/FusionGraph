@@ -212,6 +212,12 @@ Honest inventory, updated 2026-07.
   pruning included) and project them into graphs — with **snapshot-pinned,
   reproducible graph builds** (`register_iceberg_table_snapshot`)
 
+- ✅ Delta → base compaction (`CsrGraph::compact()`): restores the traversal
+  fast path after mutations (377 µs dirty → 3.9 µs compacted in benches)
+- ✅ CSR transpose (`CsrGraph::transpose()`): incoming-edge traversal
+  ("who can reach X?") as outgoing BFS on the reversed topology
+- ✅ CI: GitHub Actions on x86_64 Linux + aarch64 macOS — SIMD kernels
+  (AVX2/NEON) equivalence-validated on real hardware every push
 - ✅ R-MAT skewed-degree benchmarks incl. opt-in 100M-edge tier
   (`FG_BENCH_LARGE=1`)
 - ✅ Iceberg benchmark tier (`--bench iceberg_e2e`) + runnable Iceberg example
@@ -220,8 +226,8 @@ Honest inventory, updated 2026-07.
 - ✅ docs.rs embedding guide (crate-level docs in `fusiongraph-datafusion`)
 
 ### In progress / next (see [ROADMAP](docs/ROADMAP.md))
-- 🔜 Direction-optimizing BFS (needs CSR transpose)
-- 🔜 Delta-layer compaction (delta slow path measured at ~74x vs. clean)
+- 🔜 Direction-optimizing BFS (transpose exists; switching heuristic remains)
+- 🔜 DuckPGQ / recursive-CTE comparative benchmarks
 
 ### Explicitly deferred (not in MVP scope)
 - ⏸️ Hand-written SIMD intrinsics — the `SimdBackend` trait exists with

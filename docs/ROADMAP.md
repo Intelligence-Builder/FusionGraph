@@ -150,10 +150,24 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
 - [x] Delta-layer traversal benchmark: clean fast path 4.9 µs vs. 361 µs
       with 1k delta insertions + 100 tombstones (~74x) — motivates
       compaction (below).
-- [ ] Direction-optimizing BFS (top-down/bottom-up switching) — requires a
-      CSR transpose (incoming-edge index)
-- [ ] Delta → base compaction to bound the slow-path penalty
-- [ ] AVX2/AVX-512 numbers from an x86_64 CI runner
+- [x] Delta → base compaction (2026-07-03): `CsrGraph::compact()` —
+      LSM-style merge (insertions materialized, tombstones dropped, weights
+      preserved, `NeighborIter` dedupe semantics kept). Benchmark:
+      377 µs dirty → 3.9 µs compacted — the ~74x slow-path penalty is now
+      bounded by a compaction call.
+- [x] CSR transpose (2026-07-03): `CsrGraph::transpose()` reverses the full
+      merged topology (base + delta), enabling incoming-edge traversal
+      ("who can reach X?") as an outgoing BFS on the reverse graph.
+      `GraphTraversalExec`'s incoming-direction error now points at it.
+- [x] CI (2026-07-03): GitHub Actions on ubuntu (x86_64) + macOS (aarch64);
+      the SIMD equivalence tests validate the AVX2 kernel on the x86 runner
+      and NEON on the mac runner. fmt + clippy `-D warnings` + tests +
+      no-default-features check + bench compilation.
+- [ ] Direction-optimizing BFS (top-down/bottom-up switching) — transpose
+      exists; remaining work is keeping both directions resident and the
+      frontier-density switch heuristic
+- [ ] AVX2/AVX-512 *timing* numbers from dedicated x86_64 hardware
+      (CI validates correctness; shared runners are too noisy for criterion)
 
 ## 4. Explicitly Deferred (kill list until further notice)
 
