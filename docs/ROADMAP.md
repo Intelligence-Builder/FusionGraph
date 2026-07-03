@@ -194,12 +194,31 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
       MSRV badges in README; runbook in `docs/RELEASING.md`.
       **Actual publish is a human action** (crates.io account + token) —
       follow the runbook.
+- [ ] Publish v0.1.0 to crates.io — tracked in
+      [#33](https://github.com/Intelligence-Builder/FusionGraph/issues/33)
 - [ ] Propose to `datafusion-contrib` once published (distribution +
-      ecosystem credibility — see §2 Guiding Principles #4)
+      ecosystem credibility — see §2 Guiding Principles #4) — tracked in
+      [#34](https://github.com/Intelligence-Builder/FusionGraph/issues/34)
 - [x] Recursive-CTE comparative benchmark — see M1 entry (operator is
       ~7,500–9,500x faster than idiomatic `WITH RECURSIVE` at 10M edges)
 - [ ] DuckPGQ cross-engine comparison (needs a separate harness; DuckDB is
-      too heavy as a dev-dependency)
+      too heavy as a dev-dependency) — tracked in
+      [#35](https://github.com/Intelligence-Builder/FusionGraph/issues/35)
+
+### Issue tracker map (2026-07-03)
+
+All remaining roadmap work is filed as GitHub issues:
+
+| Issue | Item |
+|---|---|
+| [#33](https://github.com/Intelligence-Builder/FusionGraph/issues/33) | Release v0.1.0 to crates.io (runbook: `docs/RELEASING.md`) |
+| [#34](https://github.com/Intelligence-Builder/FusionGraph/issues/34) | `datafusion-contrib` proposal (blocked on #33) |
+| [#35](https://github.com/Intelligence-Builder/FusionGraph/issues/35) | DuckPGQ cross-engine benchmark harness |
+| [#36](https://github.com/Intelligence-Builder/FusionGraph/issues/36) | AVX2/AVX-512 timing on dedicated x86_64 hardware |
+| [#37](https://github.com/Intelligence-Builder/FusionGraph/issues/37) | `GraphTableProvider` scan/materialize stubs (closes epic #3 scope) |
+| [#38](https://github.com/Intelligence-Builder/FusionGraph/issues/38) | Direction-optimizing BFS in the SQL surface |
+| [#39](https://github.com/Intelligence-Builder/FusionGraph/issues/39) | Ontology loader: weights, temporal, ID transforms |
+| [#40](https://github.com/Intelligence-Builder/FusionGraph/issues/40) | Delta auto-compaction policy |
 
 ## 4. Explicitly Deferred (kill list until further notice)
 
