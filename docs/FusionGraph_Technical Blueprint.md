@@ -1,3 +1,8 @@
+> **Status: VISION DOCUMENT (not committed scope).** Several features described
+> here (AVX-512 intrinsics, e-graph optimization, Snowflake integration,
+> ReflexArc) are explicitly deferred. See [ROADMAP.md](ROADMAP.md) for the
+> committed scope and current implementation status.
+
 This comprehensive technical blueprint expands the **FusionGraph** workstreams into granular tasks, each accompanied by a specific **Success Criteria / Definition of Done (DoD)**. This ensures that the development of the "Virtual Graph Operating System" meets the high-concurrency and memory-safety requirements of the architecture.
 
 ### ---

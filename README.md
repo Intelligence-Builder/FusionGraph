@@ -1,34 +1,231 @@
 # FusionGraph
-Graph Kernel Integrated with Apache DataFusion and Arrow
 
-FusionGraph is a "Zero-ETL" graph execution layer that treats the Data Lakehouse (Iceberg/Parquet) as a virtualized adjacency list. It eliminates the "Data Movement Tax" by fusing graph traversals into the physical execution plan of the analytical engine.
-1. Architectural Layers
-Storage (The Catalog Trait): Deep integration with Apache Iceberg and Snowflake Horizon. It uses a metadata-aware mapper to prune Parquet files at the manifest level before reading data.
-Projection (Zero-Copy Bridge): Utilizes the Arrow C Data Interface to stream data from DataFusion's readers directly into the graph kernel without serialization.
-Kernel (CSR Core): A high-performance Rust binary that maintains topology in Compressed Sparse Row (CSR) format.
-Intelligence (ReflexArc): A semantic layer that orchestrates multi-hop traversals using SIMD (AVX-512) and triggers agentic actions based on topological findings.
+**Zero-ETL graph traversal for Apache DataFusion.**
 
-2. Functional Pillars
-LSM-Graph Mutability: A dual-layer model (Base + Delta) that allows for real-time updates without stalling the SIMD hot path.
-Epoch-Based Reclamation: Lock-free memory swapping that ensures wait-free traversals during background chunk compaction.
-Hot/Warm/Cold Tiering: * Hot: Active research context pinned in CSR-RAM.
-Warm: Recently accessed subgraphs in local NVMe/Page Cache.
-Cold: Raw Iceberg data in S3/Snowflake.
+FusionGraph is an open-source (Apache 2.0), embeddable graph execution layer for
+[Apache DataFusion](https://datafusion.apache.org/). It projects relational data
+(Arrow record batches, Parquet, and Apache Iceberg tables) into an in-memory
+CSR (Compressed Sparse Row) graph and executes multi-hop traversals as native
+DataFusion `ExecutionPlan` operators, instead of forcing the data through an
+ETL pipeline into a separate graph database.
 
-The advantages of FusionGraph stem from its unique "Fused Execution" architecture, which treats the data lakehouse as a high-performance virtual memory space rather than a static repository.
-Here are the primary benefits of the FusionGraph design:
-1. Zero-ETL Performance: By projecting graph topology directly from Iceberg and Parquet files, FusionGraph eliminates the "Data Movement Tax." You no longer need to manage complex pipelines to move data from your lakehouse into a specialized graph database.
+> **Status: early development (v0.1, pre-release).** The core kernel compiles,
+> is tested, and is benchmarked, but the project is not yet production-ready.
+> See [Project Status](#project-status) for an honest breakdown of what works
+> today vs. what is planned. See [docs/ROADMAP.md](docs/ROADMAP.md) for the
+> committed scope and the reasoning behind it.
 
-2. Sub-Millisecond Traversal Speeds: Despite reading from a data lake, the kernel achieves the speed of a dedicated in-memory database like Memgraph. By utilizing CSR-in-RAM structures, it replaces slow $O(\log N)$ relational joins with $O(1)$ array indexing.
+---
 
-3. Hardware-Level Acceleration (SIMD): The kernel is engineered for modern CPUs, using AVX-512 and Neon instructions to evaluate 16 node-IDs in a single clock cycle. This allows for massive "Blast Radius" or "Shortest Path" calculations on hundreds of millions of edges without bottlenecks.
+## Why
 
-4. Efficient Memory Management: The Micro-Sharding (64MB chunks) architecture solves the traditional "Compaction Wall." Instead of needing 2x RAM to update the graph, FusionGraph only rewrites the specific shards affected by new data, keeping overhead at a predictable $\text{Total RAM} + 64\text{MB}$.
+Graph workloads on lakehouse data today require copying data into a dedicated
+graph database (Neo4j, TigerGraph, Neptune) and keeping it in sync. The
+"query-in-place" alternative is validated and growing — PuppyGraph (commercial,
+closed-source) proved the market; DuckPGQ proved the embedded/extension model
+for DuckDB; Kùzu's shutdown in late 2025 left the embedded graph analytics
+niche without an established open-source successor.
 
-5. Wait-Free Concurrency: Using Epoch-Based Reclamation (EBR), the system allows for real-time data refreshes from the lakehouse without pausing active analytical queries. Traversal threads can continue at full speed even while the graph is being updated in the background.
+**DataFusion has no graph extension. FusionGraph aims to be it.**
 
-6. Agentic Orchestration Readiness: FusionGraph acts as a stateful memory layer for LLM agents. When the graph identifies a security risk or a cost optimization, it doesn't just return a table; it can trigger automated "Actions" (like revoking an IAM permission) directly within the cloud environment.
+| | PuppyGraph | DuckPGQ | Kùzu | **FusionGraph** |
+|---|---|---|---|---|
+| License | Closed-source | MIT | Archived (2025) | Apache 2.0 |
+| Deployment | Server product | DuckDB extension | Embedded | **Embedded, DataFusion-native** |
+| Engine | Proprietary | DuckDB | Own engine | **Apache DataFusion** |
+| Language | — | C++ | C++ | **Rust** |
 
-7. Modular Portability: Packaged as a Reusable OCI Image, the same Rust binary can be deployed across Snowflake SPCS, AWS, or local environments, ensuring that your graph intelligence isn't locked into a single cloud provider's proprietary stack.
+## Target use cases
 
-8. Unified Governance: The project was originally conceived to work with Snowflake. Because it is designed to run as a Snowflake Native App, every graph traversal is governed by Snowflake Horizon. It respects column-level masking and RBAC policies automatically, and every "research event" is logged in the customer’s existing audit trails. 
+- **Security / IAM blast-radius analysis** — multi-hop permission traversal over cloud audit tables
+- **Fraud / AML** — account → device → merchant → beneficiary path analysis on lakehouse data
+- **GraphRAG** — graph-shaped retrieval over data that already lives in Parquet/Iceberg
+- **Supply chain & root-cause analysis** — dependency traversal across event and asset tables
+
+## Architecture (current)
+
+```
+┌──────────────────────────────────────────────────────┐
+│ fusiongraph-datafusion                               │
+│   GraphTableProvider (TableProvider impl)            │
+│   CSRBuilderExec     (RecordBatch stream → CSR)      │
+│   GraphTraversalExec (BFS as an ExecutionPlan)       │
+├──────────────────────────────────────────────────────┤
+│ fusiongraph-ontology                                 │
+│   TOML/JSON schema: tables → node/edge labels        │
+├──────────────────────────────────────────────────────┤
+│ fusiongraph-core                                     │
+│   CSR shards (64MB micro-shards)                     │
+│   BFS traversal + visited bitsets                    │
+│   Delta layer (DashMap) for edge mutations           │
+│   SIMD backend trait (scalar today; see status)      │
+├──────────────────────────────────────────────────────┤
+│ fusiongraph-ffi                                      │
+│   Arrow C Data Interface bindings                    │
+└──────────────────────────────────────────────────────┘
+```
+
+## Quick start
+
+```bash
+cargo build --workspace
+cargo test --workspace
+
+# Run benchmarks (includes CSR BFS vs. DataFusion multi-hop join comparison)
+cargo bench -p fusiongraph-core
+cargo bench -p fusiongraph-datafusion
+```
+
+## Benchmarks (preliminary)
+
+k-hop reachability from a start node on a uniform random graph (out-degree 8),
+identical data on both paths. SQL path = idiomatic chained self-joins +
+`UNION`/`DISTINCT` executed by DataFusion 45 over a `MemTable`. Apple Silicon,
+`cargo bench -p fusiongraph-datafusion`, criterion `--quick`:
+
+| Workload | CSR BFS | DataFusion SQL | Speedup |
+|---|---:|---:|---:|
+| 10k nodes / 80k edges, 2-hop | 11.7 µs | 1.72 ms | **~147x** |
+| 10k nodes / 80k edges, 3-hop | 88.9 µs | 3.08 ms | **~35x** |
+| 100k nodes / 800k edges, 2-hop | 12.2 µs | 6.81 ms | **~558x** |
+| 100k nodes / 800k edges, 3-hop | 88.9 µs | 14.3 ms | **~161x** |
+
+One-time CSR projection cost: 365 µs (80k edges), 3.65 ms (800k edges) — i.e.
+building the graph pays for itself within a **single** 3-hop query at 800k-edge
+scale. Both paths are sanity-checked to agree on the reachable-set size.
+
+### End-to-end on Parquet, 10M edges (M1)
+
+1.25M nodes × out-degree 8 = 10M edges stored in Parquet. The zero-ETL
+pipeline exercises the real operators: `ParquetExec` scan →
+`CoalescePartitionsExec` → `CSRBuilderExec` (graph captured via `GraphSink`)
+→ `GraphTraversalExec`. `cargo bench -p fusiongraph-datafusion --bench parquet_e2e`:
+
+| Path | 2-hop | 3-hop |
+|---|---:|---:|
+| CSR BFS (kernel) | 12.3 µs | 91.4 µs |
+| `GraphTraversalExec` (operator, incl. Arrow output) | 17.2 µs | 96.5 µs |
+| DataFusion SQL (chained joins on Parquet) | 23.0 ms | 59.5 ms |
+| **Speedup (operator vs. SQL)** | **~1,340x** | **~617x** |
+
+One-time Parquet → CSR projection: **208 ms** for all 10M edges — it pays for
+itself after ~4 SQL 3-hop queries. Operator overhead vs. the raw kernel is
+~5 µs per traversal (Arrow result materialization).
+
+```rust
+use fusiongraph_core::{CsrGraph, NodeId, traversal::bfs};
+
+// Build a CSR graph from edges
+let graph = CsrGraph::from_edges(&[(0, 1), (1, 2), (2, 3)]);
+
+// 3-hop BFS from node 0
+let result = bfs(&graph, NodeId::new(0), 3);
+assert_eq!(result.node_count(), 4);
+```
+
+### Graph traversal in plain SQL
+
+Build a graph once (e.g. from Parquet via the operator pipeline), register it,
+and traverse it from any query — results compose with joins, filters, and
+aggregations:
+
+```rust
+use fusiongraph_datafusion::{register_graph_traverse, GraphCatalog};
+
+let catalog = GraphCatalog::new();
+catalog.register("iam", graph); // Arc<CsrGraph> from the build pipeline
+register_graph_traverse(&ctx, &catalog);
+```
+
+```sql
+-- Blast radius: everything reachable from node 0 within 3 hops
+SELECT t.node_id, t.depth, COUNT(e.target) AS outgoing_edges
+FROM graph_traverse('iam', 0, 3) t
+LEFT JOIN edges e ON e.source = t.node_id
+WHERE t.depth > 0
+GROUP BY t.node_id, t.depth
+ORDER BY t.depth;
+```
+
+Run the full Parquet → CSR → SQL demo:
+
+```bash
+cargo run -p fusiongraph-datafusion --example graph_traverse
+```
+
+### Iceberg: ontology-driven, snapshot-pinned graphs
+
+```rust
+use fusiongraph_datafusion::{
+    register_iceberg_table_snapshot, register_ontology_graphs,
+};
+use fusiongraph_ontology::Ontology;
+
+// Pin the edge table to an exact Iceberg snapshot: the projected graph is
+// reproducible regardless of concurrent appends.
+register_iceberg_table_snapshot(&ctx, "edges", table, snapshot_id).await?;
+
+// fusiongraph.toml maps tables -> node/edge labels; every edge definition
+// becomes a named graph, immediately queryable via graph_traverse().
+let ontology = Ontology::from_file("fusiongraph.toml")?;
+let names = register_ontology_graphs(&ctx, &ontology, &catalog).await?;
+// e.g. SELECT * FROM graph_traverse('iam_graph.CAN_ASSUME', 0, 3)
+```
+
+## Project status
+
+Honest inventory, updated 2026-07.
+
+### Works today
+- ✅ CSR storage with micro-sharding (`fusiongraph-core`)
+- ✅ BFS traversal with depth tracking and level extraction
+- ✅ Lock-free delta layer for edge insertions/tombstones (DashMap)
+- ✅ Ontology schema parser + validation (TOML/JSON)
+- ✅ `GraphTableProvider`, `CSRBuilderExec`, `GraphTraversalExec` DataFusion operators
+- ✅ `GraphSink`: capture the built graph from `CSRBuilderExec` for downstream traversal
+- ✅ `graph_traverse()` SQL table function + `GraphCatalog` registry
+  (projection, `WHERE`, `LIMIT`, joins against regular tables all work)
+- ✅ Parquet → CSR end-to-end pipeline, benchmarked at 10M edges
+- ✅ Arrow C Data Interface FFI surface
+- ✅ Criterion benchmarks, including CSR traversal vs. equivalent DataFusion SQL joins
+- ✅ Runnable demo: `cargo run -p fusiongraph-datafusion --example graph_traverse`
+- ✅ Ontology-driven graph registration: `register_ontology_graphs` projects
+  every edge definition in a `fusiongraph.toml` into a named, SQL-queryable graph
+- ✅ **Apache Iceberg support** (feature `iceberg`, default-on): register Iceberg
+  tables via the official `iceberg-datafusion` provider (manifest-based file
+  pruning included) and project them into graphs — with **snapshot-pinned,
+  reproducible graph builds** (`register_iceberg_table_snapshot`)
+
+### In progress / next (see [ROADMAP](docs/ROADMAP.md))
+- 🔜 100M-edge and skewed-degree (R-MAT) benchmark tier
+- 🔜 Iceberg benchmark tier + REST/Glue catalog examples
+
+### Explicitly deferred (not in MVP scope)
+- ⏸️ Hand-written SIMD intrinsics — the `SimdBackend` trait exists with
+  runtime dispatch (AVX-512/AVX2/NEON/scalar), but all backends currently
+  delegate to the scalar implementation. Vectorization lands only after
+  profiling shows it matters on the benchmarked workloads.
+- ⏸️ E-graph query optimization (datafusion-tokomak is unmaintained)
+- ⏸️ Snowflake Native App / Horizon integration
+- ⏸️ Agentic orchestration ("ReflexArc") layer
+
+Documents in `docs/` that describe these deferred features are **vision
+documents**, not commitments — each is marked with a status banner.
+
+## Crate structure
+
+| Crate | Purpose |
+|-------|---------|
+| `fusiongraph-core` | CSR storage, delta layer, BFS traversal |
+| `fusiongraph-ontology` | TOML/JSON schema parser and validation |
+| `fusiongraph-datafusion` | DataFusion `TableProvider` and `ExecutionPlan` operators |
+| `fusiongraph-ffi` | Arrow C Data Interface bindings |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). PRs must pass `cargo test`,
+`cargo clippy -- -D warnings`, and `cargo fmt --check`.
+
+## License
+
+Apache 2.0

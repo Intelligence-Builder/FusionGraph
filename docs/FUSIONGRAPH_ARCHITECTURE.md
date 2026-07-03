@@ -1,3 +1,8 @@
+> **Status: VISION DOCUMENT (not committed scope).** Several features described
+> here (AVX-512 intrinsics, e-graph optimization, Snowflake integration,
+> ReflexArc) are explicitly deferred. See [ROADMAP.md](ROADMAP.md) for the
+> committed scope and current implementation status.
+
 # FusionGraph Architecture
 
 **Zero-Copy Graph Processing on Apache DataFusion**
