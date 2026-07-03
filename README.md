@@ -110,8 +110,10 @@ real operators: table scan → `CoalescePartitionsExec` → `CSRBuilderExec`
 
 One-time projection of all 10M edges: **204 ms** from Parquet, **174 ms**
 from Iceberg — it pays for itself in a handful of SQL queries. At 100M edges
-(R-MAT, skewed degrees), a near-full-graph BFS completes in **416 ms**
-(~240M edges/sec examined); run it with
+(R-MAT, skewed degrees), a near-full-graph BFS completes in **416 ms**, and
+**direction-optimizing BFS** (`bfs_direction_optimized`, Beamer-style
+top-down/bottom-up switching over the graph + its transpose) brings it to
+**140 ms (~714M edges/sec)**; run it with
 `FG_BENCH_LARGE=1 cargo bench -p fusiongraph-core`.
 
 ### M4 kernel notes (profile-guided)
@@ -216,6 +218,9 @@ Honest inventory, updated 2026-07.
   fast path after mutations (377 µs dirty → 3.9 µs compacted in benches)
 - ✅ CSR transpose (`CsrGraph::transpose()`): incoming-edge traversal
   ("who can reach X?") as outgoing BFS on the reversed topology
+- ✅ Direction-optimizing BFS (`bfs_direction_optimized`): Beamer-style
+  hybrid traversal, 2.2–3.2x faster on skewed-graph hub traversals
+  (100M-edge BFS: 443 ms → 140 ms)
 - ✅ CI: GitHub Actions on x86_64 Linux + aarch64 macOS — SIMD kernels
   (AVX2/NEON) equivalence-validated on real hardware every push
 - ✅ R-MAT skewed-degree benchmarks incl. opt-in 100M-edge tier
@@ -226,7 +231,7 @@ Honest inventory, updated 2026-07.
 - ✅ docs.rs embedding guide (crate-level docs in `fusiongraph-datafusion`)
 
 ### In progress / next (see [ROADMAP](docs/ROADMAP.md))
-- 🔜 Direction-optimizing BFS (transpose exists; switching heuristic remains)
+- 🔜 crates.io publishing + `datafusion-contrib` proposal
 - 🔜 DuckPGQ / recursive-CTE comparative benchmarks
 
 ### Explicitly deferred (not in MVP scope)

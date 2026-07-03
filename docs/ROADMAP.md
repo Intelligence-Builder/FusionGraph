@@ -146,7 +146,9 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
       scalar on `aarch64`. Backend stays available for other ARM cores.
 - [x] AVX2 implementation (gather + variable shifts + movemask); compiles
       and dispatches behind runtime detection, delegated to by the AVX-512
-      slot. Needs validation/benchmarking on x86_64 hardware (CI item).
+      slot. **Validated on real x86_64 hardware** via CI (2026-07-03): the
+      equivalence tests passed on the ubuntu runner; the first CI run also
+      caught an x86-only lint the aarch64 dev machine could not see.
 - [x] Delta-layer traversal benchmark: clean fast path 4.9 µs vs. 361 µs
       with 1k delta insertions + 100 tombstones (~74x) — motivates
       compaction (below).
@@ -163,11 +165,26 @@ graph engine* — vs. PuppyGraph (closed, server product), DuckPGQ
       the SIMD equivalence tests validate the AVX2 kernel on the x86 runner
       and NEON on the mac runner. fmt + clippy `-D warnings` + tests +
       no-default-features check + bench compilation.
-- [ ] Direction-optimizing BFS (top-down/bottom-up switching) — transpose
-      exists; remaining work is keeping both directions resident and the
-      frontier-density switch heuristic
+- [x] Direction-optimizing BFS — done under M5 (see below): transpose +
+      α/β frontier-density heuristic, 2.2–3.2x on R-MAT hub traversals
 - [ ] AVX2/AVX-512 *timing* numbers from dedicated x86_64 hardware
       (CI validates correctness; shared runners are too noisy for criterion)
+
+### M5 — Ecosystem readiness (next)
+- [x] Direction-optimizing BFS (2026-07-03): `bfs_direction_optimized`
+      implements Beamer-style top-down/bottom-up switching (α=14, β=24)
+      over the forward graph + its transpose. Equivalence-tested against
+      `bfs` per level on chain/star/diamond/uniform/R-MAT topologies;
+      falls back to the delta-aware BFS when the forward graph has live
+      mutations; rejects mismatched or delta-carrying transposes
+      (FG-TRV-E002). Measured on R-MAT hub traversals:
+      **2.2x at 8.4M edges (3-hop), 3.2x at 100M edges (443 ms → 140 ms,
+      ~714M edges/sec)**.
+- [ ] crates.io publishing prep: version metadata, README badges, dry-run
+      `cargo publish` for the four crates in dependency order
+- [ ] Propose to `datafusion-contrib` once published (distribution +
+      ecosystem credibility — see §2 Guiding Principles #4)
+- [ ] DuckPGQ / recursive-CTE comparative benchmarks
 
 ## 4. Explicitly Deferred (kill list until further notice)
 

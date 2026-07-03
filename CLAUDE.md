@@ -17,6 +17,13 @@ appear in the roadmap milestones.
   SQL on the same engine) must stay measured. Do not merge features ahead of
   the benchmark that justifies them. Benches: `cargo bench -p fusiongraph-core`
   and `cargo bench -p fusiongraph-datafusion`.
+- **Cross-lint before pushing:** dev machines are Apple Silicon; the AVX2 code
+  path only gets linted on x86_64. Run
+  `cargo clippy --target x86_64-apple-darwin --workspace --all-targets -- -D warnings`
+  locally (CI runs the equivalent on ubuntu and *will* catch it otherwise).
+- **CI** (`.github/workflows/ci.yml`) runs fmt + clippy `-D warnings` + tests
+  on ubuntu (x86_64, validates AVX2 kernel) and macOS (aarch64, validates
+  NEON), plus a no-default-features check and bench compilation.
 - **Deferred (kill list):** AVX-512 intrinsics, datafusion-tokomak/e-graphs,
   Snowflake Native App/Horizon, ReflexArc agentic layer, Substrait,
   hot/warm/cold tiering. Reject PRs implementing these without a roadmap change.

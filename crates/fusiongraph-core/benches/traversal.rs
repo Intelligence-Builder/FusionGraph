@@ -13,7 +13,9 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use fusiongraph_core::gen::{rmat, uniform};
-use fusiongraph_core::traversal::{bfs, bfs_bounded_with_backend, ScalarBackend};
+use fusiongraph_core::traversal::{
+    bfs, bfs_bounded_with_backend, bfs_direction_optimized, ScalarBackend,
+};
 use fusiongraph_core::types::EdgeData;
 use fusiongraph_core::{CsrGraph, NodeId};
 
@@ -63,11 +65,27 @@ fn bench_rmat(c: &mut Criterion) {
 
     // scale 20 = 1M nodes, edge factor 8 = ~8.4M edges.
     let graph = CsrGraph::from_edges(&rmat(20, 8, 0x5EED));
+    let reverse = graph.transpose().expect("transpose");
     // Start from a hub (node 0 is in the densest R-MAT quadrant).
     for depth in [2u32, 3] {
         group.bench_with_input(BenchmarkId::new("scale20_ef8", depth), &depth, |b, &d| {
             b.iter(|| bfs(black_box(&graph), black_box(NodeId::new(0)), black_box(d)));
         });
+        group.bench_with_input(
+            BenchmarkId::new("scale20_ef8_dobfs", depth),
+            &depth,
+            |b, &d| {
+                b.iter(|| {
+                    bfs_direction_optimized(
+                        black_box(&graph),
+                        black_box(&reverse),
+                        black_box(NodeId::new(0)),
+                        black_box(d),
+                    )
+                    .expect("valid transpose")
+                });
+            },
+        );
     }
 
     group.finish();
@@ -78,12 +96,28 @@ fn bench_rmat(c: &mut Criterion) {
         let mut large = c.benchmark_group("bfs_rmat_large");
         large.sample_size(10);
         let graph = CsrGraph::from_edges(&rmat(23, 12, 0x5EED));
+        let reverse = graph.transpose().expect("transpose");
         for depth in [3u32, 6] {
             large.bench_with_input(
                 BenchmarkId::new("scale23_ef12_100m", depth),
                 &depth,
                 |b, &d| {
                     b.iter(|| bfs(black_box(&graph), black_box(NodeId::new(0)), black_box(d)));
+                },
+            );
+            large.bench_with_input(
+                BenchmarkId::new("scale23_ef12_100m_dobfs", depth),
+                &depth,
+                |b, &d| {
+                    b.iter(|| {
+                        bfs_direction_optimized(
+                            black_box(&graph),
+                            black_box(&reverse),
+                            black_box(NodeId::new(0)),
+                            black_box(d),
+                        )
+                        .expect("valid transpose")
+                    });
                 },
             );
         }

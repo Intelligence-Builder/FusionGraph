@@ -15,10 +15,12 @@
 
 mod bfs;
 pub mod bitset;
+mod dobfs;
 pub mod simd;
 
 pub use bfs::{bfs, bfs_bounded, bfs_bounded_with_backend, bfs_multi, BfsResult};
 pub use bitset::AtomicBitset;
+pub use dobfs::bfs_direction_optimized;
 pub use simd::{
     backend_name, dense_index_to_node_id, node_id_to_dense_index, select_backend, ScalarBackend,
     SimdBackend,
