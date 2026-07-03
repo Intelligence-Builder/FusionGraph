@@ -188,7 +188,7 @@ mod proptest_tests {
                     version: "1.0".to_string(),
                     description: String::new(),
                 },
-                settings: Default::default(),
+                settings: crate::schema::OntologySettings::default(),
                 nodes,
                 edges: vec![],
                 properties: vec![],

@@ -27,8 +27,28 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 num_cpus = { workspace = true }
 
+iceberg = { workspace = true, optional = true }
+iceberg-datafusion = { workspace = true, optional = true }
+
+[features]
+default = ["iceberg"]
+iceberg = ["dep:iceberg", "dep:iceberg-datafusion"]
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+criterion = { workspace = true }
+parquet = { workspace = true }
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+serde_json = { workspace = true }
+
+[[bench]]
+name = "traversal_vs_sql"
+harness = false
+
+[[bench]]
+name = "parquet_e2e"
+harness = false
 
 [lints]
 workspace = true

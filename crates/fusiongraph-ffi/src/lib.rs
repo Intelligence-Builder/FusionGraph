@@ -240,7 +240,7 @@ mod tests {
         ]);
 
         let ids: Vec<u64> = (0..n as u64).collect();
-        let values: Vec<f64> = (0..n).map(|i| i as f64 * 0.1).collect();
+        let values: Vec<f64> = (0u32..10_000).map(|i| f64::from(i) * 0.1).collect();
 
         let original = RecordBatch::try_new(
             Arc::new(schema),

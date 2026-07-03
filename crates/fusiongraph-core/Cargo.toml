@@ -22,6 +22,10 @@ tracing = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 
+[[bench]]
+name = "traversal"
+harness = false
+
 [features]
 default = []
 simd = []  # Enable SIMD optimizations

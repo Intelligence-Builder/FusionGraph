@@ -148,7 +148,9 @@ impl GraphTraversalExec {
 impl DisplayAs for GraphTraversalExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
         match t {
-            DisplayFormatType::Default | DisplayFormatType::Verbose => {
+            DisplayFormatType::Default
+            | DisplayFormatType::Verbose
+            | DisplayFormatType::TreeRender => {
                 write!(
                     f,
                     "GraphTraversalExec: algorithm={:?}, max_depth={}, starts={}",

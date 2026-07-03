@@ -17,15 +17,16 @@ authors = ["Intelligence-Builder"]
 
 [workspace.dependencies]
 # Arrow ecosystem
-arrow = { version = "54", default-features = false, features = ["ffi"] }
-arrow-array = "54"
-arrow-schema = "54"
-datafusion = "45"
-datafusion-common = "45"
-datafusion-expr = "45"
-datafusion-physical-plan = "45"
-iceberg = "0.4"
-parquet = "54"
+arrow = { version = "55", default-features = false, features = ["ffi"] }
+arrow-array = "55"
+arrow-schema = "55"
+datafusion = "47"
+datafusion-common = "47"
+datafusion-expr = "47"
+datafusion-physical-plan = "47"
+iceberg = "0.5.1"
+iceberg-datafusion = "0.5.1"
+parquet = "55"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

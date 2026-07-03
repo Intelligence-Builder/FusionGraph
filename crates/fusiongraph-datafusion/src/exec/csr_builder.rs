@@ -3,7 +3,7 @@
 use std::any::Any;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 
 use arrow::array::{Array, ArrayRef, RecordBatch, UInt64Array};
@@ -21,6 +21,23 @@ use datafusion::physical_plan::{
 use futures::{Stream, StreamExt};
 
 use fusiongraph_core::csr::CsrBuilder;
+use fusiongraph_core::CsrGraph;
+
+/// Shared slot that receives the built [`CsrGraph`] when a
+/// [`CSRBuilderExec`] finishes executing.
+///
+/// The statistics batch emitted by the operator describes the graph, but
+/// downstream consumers (e.g. [`GraphTraversalExec`](super::GraphTraversalExec))
+/// need the graph itself. Create a sink with [`new_graph_sink`], place a clone
+/// in [`CsrBuildConfig::graph_sink`], execute the plan, then call
+/// `sink.get()` to retrieve the built graph.
+pub type GraphSink = Arc<OnceLock<Arc<CsrGraph>>>;
+
+/// Creates an empty [`GraphSink`].
+#[must_use]
+pub fn new_graph_sink() -> GraphSink {
+    Arc::new(OnceLock::new())
+}
 
 /// Configuration for CSR building.
 #[derive(Debug, Clone)]
@@ -35,6 +52,10 @@ pub struct CsrBuildConfig {
     pub source_column: String,
     /// Name of target column (default: "target").
     pub target_column: String,
+    /// Optional sink that receives the built graph so it can be handed to
+    /// downstream operators (default: `None`, graph is dropped after the
+    /// statistics batch is emitted).
+    pub graph_sink: Option<GraphSink>,
 }
 
 impl Default for CsrBuildConfig {
@@ -45,6 +66,7 @@ impl Default for CsrBuildConfig {
             memory_limit: None,
             source_column: "source".to_string(),
             target_column: "target".to_string(),
+            graph_sink: None,
         }
     }
 }
@@ -102,7 +124,9 @@ impl CSRBuilderExec {
 impl DisplayAs for CSRBuilderExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
         match t {
-            DisplayFormatType::Default | DisplayFormatType::Verbose => {
+            DisplayFormatType::Default
+            | DisplayFormatType::Verbose
+            | DisplayFormatType::TreeRender => {
                 write!(
                     f,
                     "CSRBuilderExec: shard_size={}, parallelism={}, source={}, target={}",
@@ -314,6 +338,13 @@ impl CsrBuildStream {
         let shard_count = UInt64Array::from(vec![graph.shard_count() as u64]);
         let build_time = UInt64Array::from(vec![elapsed_ms]);
 
+        // Publish the graph to the sink (if configured) so downstream
+        // consumers can traverse it. `set` fails only if the sink was already
+        // filled, which cannot happen for a single-partition, run-once stream.
+        if let Some(sink) = &self.config.graph_sink {
+            let _ = sink.set(Arc::new(graph));
+        }
+
         RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
@@ -371,7 +402,7 @@ impl Stream for CsrBuildStream {
 mod tests {
     use super::*;
     use arrow::array::{Int32Array, UInt64Array};
-    use datafusion::physical_plan::memory::MemoryExec;
+    use datafusion::datasource::memory::MemorySourceConfig;
     use datafusion::prelude::SessionContext;
 
     fn create_edge_batch(sources: Vec<u64>, targets: Vec<u64>) -> RecordBatch {
@@ -420,7 +451,7 @@ mod tests {
         let batch = create_edge_batch(vec![0, 0, 1, 2], vec![1, 2, 2, 3]);
         let schema = batch.schema();
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
         let builder = CSRBuilderExec::new(input, CsrBuildConfig::default());
 
         let ctx = SessionContext::new();
@@ -453,7 +484,7 @@ mod tests {
             Field::new("target", DataType::UInt64, false),
         ]));
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![]], schema, None).unwrap();
         let builder = CSRBuilderExec::new(input, CsrBuildConfig::default());
 
         let ctx = SessionContext::new();
@@ -475,7 +506,7 @@ mod tests {
         let batch = create_named_edge_batch("src_id", "dst_id", vec![0, 0, 1, 2], vec![1, 2, 2, 3]);
         let schema = batch.schema();
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
         let config = CsrBuildConfig {
             source_column: "src_id".to_string(),
             target_column: "dst_id".to_string(),
@@ -509,7 +540,7 @@ mod tests {
         let batch = create_edge_batch(vec![0, 1], vec![1, 2]);
         let schema = batch.schema();
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
         let config = CsrBuildConfig {
             source_column: "src".to_string(),
             ..CsrBuildConfig::default()
@@ -533,7 +564,7 @@ mod tests {
         let batch = create_wrong_type_batch();
         let schema = batch.schema();
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
         let builder = CSRBuilderExec::new(input, CsrBuildConfig::default());
 
         let ctx = SessionContext::new();
@@ -553,7 +584,7 @@ mod tests {
         let batch = create_edge_batch(vec![0, 1, 2], vec![1, 2, 3]);
         let schema = batch.schema();
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
         let config = CsrBuildConfig {
             memory_limit: Some(std::mem::size_of::<(u64, u64)>() * 2),
             ..CsrBuildConfig::default()
@@ -577,7 +608,7 @@ mod tests {
         let batch = create_edge_batch(vec![0], vec![1]);
         let schema = batch.schema();
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
         let builder = CSRBuilderExec::new(input, CsrBuildConfig::default());
 
         let ctx = SessionContext::new();
@@ -599,9 +630,9 @@ mod tests {
         let batch_two = create_edge_batch(vec![1], vec![2]);
         let schema = batch_one.schema();
 
-        let input = Arc::new(
-            MemoryExec::try_new(&[vec![batch_one], vec![batch_two]], schema, None).unwrap(),
-        );
+        let input =
+            MemorySourceConfig::try_new_exec(&[vec![batch_one], vec![batch_two]], schema, None)
+                .unwrap();
         let builder = CSRBuilderExec::new(input, CsrBuildConfig::default());
 
         let ctx = SessionContext::new();
@@ -619,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_datafusion_integration_multi_batch() {
-        // Integration test: process multiple batches from a MemoryExec source
+        // Integration test: process multiple batches from a memory source
         // through CSRBuilderExec and verify complete graph statistics.
         let batch1 = create_edge_batch(vec![0, 0, 1], vec![1, 2, 2]);
         let batch2 = create_edge_batch(vec![2, 3, 3], vec![3, 4, 5]);
@@ -627,8 +658,8 @@ mod tests {
         let schema = batch1.schema();
 
         // Combine batches into single partition (required by CSRBuilderExec)
-        let input =
-            Arc::new(MemoryExec::try_new(&[vec![batch1, batch2, batch3]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch1, batch2, batch3]], schema, None)
+            .unwrap();
 
         let config = CsrBuildConfig {
             shard_size: 64 * 1024 * 1024,
@@ -680,7 +711,7 @@ mod tests {
         let batch = create_edge_batch(vec![0, 0, 1, 2], vec![1, 2, 2, 3]);
         let schema = batch.schema();
 
-        let input = Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None).unwrap());
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
         let builder = CSRBuilderExec::new(input, CsrBuildConfig::default());
 
         let ctx = SessionContext::new();
@@ -704,5 +735,47 @@ mod tests {
 
         assert_eq!(node_count, 4, "Graph should have 4 nodes (0, 1, 2, 3)");
         assert!(shard_count >= 1, "Should have at least 1 shard");
+    }
+
+    #[tokio::test]
+    async fn test_graph_sink_enables_traversal_pipeline() {
+        use datafusion::physical_plan::collect;
+        use fusiongraph_core::traversal::TraversalSpec;
+        use fusiongraph_core::NodeId;
+
+        // Chain 0 -> 1 -> 2 -> 3 plus a branch 1 -> 3.
+        let batch = create_edge_batch(vec![0, 1, 2, 1], vec![1, 2, 3, 3]);
+        let schema = batch.schema();
+
+        let input = MemorySourceConfig::try_new_exec(&[vec![batch]], schema, None).unwrap();
+        let sink = new_graph_sink();
+        let config = CsrBuildConfig {
+            graph_sink: Some(Arc::clone(&sink)),
+            ..CsrBuildConfig::default()
+        };
+        let builder = Arc::new(CSRBuilderExec::new(input, config));
+
+        let ctx = SessionContext::new();
+
+        // Stage 1: run the build operator to completion.
+        let stats = collect(builder, ctx.task_ctx()).await.unwrap();
+        assert_eq!(stats.len(), 1, "build emits one statistics batch");
+
+        // Stage 2: retrieve the built graph and traverse it.
+        let graph = Arc::clone(sink.get().expect("sink holds the built graph"));
+        assert_eq!(graph.node_count(), 4);
+        assert_eq!(graph.edge_count(), 4);
+
+        let spec = TraversalSpec {
+            start: vec![NodeId::new(0)],
+            max_depth: 2,
+            ..TraversalSpec::default()
+        };
+        let traversal = Arc::new(super::super::GraphTraversalExec::new(graph, spec));
+        let batches = collect(traversal, ctx.task_ctx()).await.unwrap();
+
+        let visited: usize = batches.iter().map(RecordBatch::num_rows).sum();
+        // BFS depth 2 from node 0 reaches {0, 1, 2, 3} (3 via the 1 -> 3 branch).
+        assert_eq!(visited, 4, "2-hop BFS should visit all four nodes");
     }
 }
